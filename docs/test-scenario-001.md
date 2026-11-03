@@ -8,16 +8,18 @@
 
 ## 2. 전제 조건
 
-| 항목 | 값 |
-|------|------|
-| 시험 환경 | Equipment Simulator (127.0.0.1:5000) |
-| Host 역할 | Active |
-| Equipment 역할 | Passive |
-| Device ID | 0 |
-| T3 | 45초 |
-| T5 | 10초 |
-| T6 | 5초 |
-| T7 | 10초 |
+| 항목 | 값 | 비고 |
+|------|------|------|
+| 시험 환경 | TBD | Equipment Simulator 선정 후 확정 |
+| Host 역할 | TBD | Interface Specification 확보 후 확정 |
+| Equipment 역할 | TBD | Interface Specification 확보 후 확정 |
+| Device ID | TBD | Interface Specification 확보 후 확정 |
+| T3 | TBD | SEMI 표준 기본값 45초 참고 |
+| T5 | TBD | SEMI 표준 기본값 10초 참고 |
+| T6 | TBD | SEMI 표준 기본값 5초 참고 |
+| T7 | TBD | SEMI 표준 기본값 10초 참고 |
+
+> **비규범적 예시**: Simulator 환경에서는 IP=127.0.0.1, Port=5000, Device ID=0, Host=Active, Equipment=Passive 등을 사용할 수 있으나, 실제 값은 Simulator 선정 및 설비 사양서 확보 후 확정한다.
 
 ## 3. Scenario A — 정상 흐름
 
@@ -29,7 +31,7 @@ HSMS 연결부터 Remote Command 전송, Event Report 수신까지 전체 정상
 
 | 순서 | 동작 | 방향 | 예상 결과 | Timeout |
 |------|------|------|-----------|---------|
-| 1 | TCP Connect | H → E | TCP 연결 성공 | T5 |
+| 1 | TCP Connect | H → E | TCP 연결 성공 | TCP Connect Timeout (T5와 구분) |
 | 2 | Select.req | H → E | Select.rsp 수신 (Status=0) | T6 |
 | 3 | S1F13 Establish Communication | H → E | S1F14 수신, COMMACK=0 | T3 |
 | 4 | S1F17 Request ON-LINE | H → E | S1F18 수신, ONLACK=0 | T3 |
@@ -57,7 +59,7 @@ HSMS 연결부터 Remote Command 전송, Event Report 수신까지 전체 정상
 
 | 순서 | 동작 | 방향 | 예상 결과 | Timeout |
 |------|------|------|-----------|---------|
-| 1 | TCP Connect | H → E | TCP 연결 성공 | T5 |
+| 1 | TCP Connect | H → E | TCP 연결 성공 | TCP Connect Timeout |
 | 2 | Select.req | H → E | Select.rsp 수신 (Status=0) | T6 |
 | 3 | S1F13 Establish Communication | H → E | S1F14 수신, COMMACK=1 (Denied) | T3 |
 | 4 | 상태 확인 | — | GEM 상태가 Communication Not Established 유지 | — |
@@ -96,7 +98,7 @@ HSMS 연결부터 Remote Command 전송, Event Report 수신까지 전체 정상
 
 | 순서 | 동작 | 방향 | 예상 결과 | Timeout |
 |------|------|------|-----------|---------|
-| 1 | TCP Connect | H → E | TCP 연결 성공 | T5 |
+| 1 | TCP Connect | H → E | TCP 연결 성공 | TCP Connect Timeout |
 | 2 | Select.req | H → E | Select.rsp 수신 (Status=0) | T6 |
 | 3 | S1F13 전송 | H → E | S1F14 미수신 | T3 |
 | 4 | Timeout 감지 | — | T3 Timeout 발생, Scenario FAIL 기록 | T3 |
@@ -119,11 +121,12 @@ HSMS 연결부터 Remote Command 전송, Event Report 수신까지 전체 정상
 
 | 순서 | 동작 | 방향 | 예상 결과 | Timeout |
 |------|------|------|-----------|---------|
-| 1 | TCP Connect (잘못된 IP/Port) | H → E | TCP 연결 실패 | T5 |
-| 2 | 상태 확인 | — | Disconnected 상태, 프로그램 종료 없음 | — |
-| 3 | 로그 확인 | — | 연결 실패 원인이 기록됨 | — |
+| 1 | TCP Connect (잘못된 IP/Port) | H → E | TCP 연결 실패 | TCP Connect Timeout |
+| 2 | T5 대기 확인 | — | T5 대기 후 재시도 가능 상태 (T5는 연결 실패 후 다음 시도까지의 대기 시간) | T5 |
+| 3 | 상태 확인 | — | Disconnected 상태, 프로그램 종료 없음 | — |
+| 4 | 로그 확인 | — | 연결 실패 원인이 기록됨 | — |
 
-판정: 연결 실패를 감지하고 프로그램이 안전하면 **PASS**
+판정: 연결 실패를 감지하고, T5 대기 후 재시도 상태로 전이하며, 프로그램이 안전하면 **PASS**
 
 ## 6. 공통 판정 규칙
 

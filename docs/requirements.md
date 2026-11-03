@@ -16,11 +16,11 @@
 
 | 항목 | 값 | 비고 |
 |------|------|------|
-| Host 역할 | Active (TCP Client) | 일반적 구성. 설비 사양서 확인 후 확정 |
-| Equipment 역할 | Passive (TCP Server) | 일반적 구성. 설비 사양서 확인 후 확정 |
-| 연결 주체 | Host가 Equipment에 접속 | |
+| Host 역할 | TBD | Interface Specification 확보 후 확정 |
+| Equipment 역할 | TBD | Interface Specification 확보 후 확정 |
+| 연결 주체 | TBD | Host/Equipment 역할에 따라 결정 |
 
-> **TBD**: 일부 설비는 Equipment가 Active, Host가 Passive인 경우가 있다. Interface Specification 확보 후 확정한다.
+> **참고**: 일반적으로 Host=Active(TCP Client), Equipment=Passive(TCP Server)이나 설비에 따라 반대일 수 있다. Interface Specification 확보 후 확정한다.
 
 ## 4. 접속 정보
 
@@ -31,19 +31,15 @@
 | Device ID | TBD | 설비 사양서 확인 후 확정 |
 | Session ID | TBD | 설비 사양서 확인 후 확정 |
 
-개발 및 시험 단계에서는 Equipment Simulator를 사용하며, 다음 기본값을 적용한다.
+개발 및 시험 단계에서는 Equipment Simulator를 사용한다. Simulator 선정 후 접속 정보를 확정한다.
 
-| 항목 | 시뮬레이터 기본값 |
-|------|------|
-| IP | 127.0.0.1 |
-| Port | 5000 |
-| Device ID | 0 |
+> **비규범적 예시**: Simulator 환경에서는 IP=127.0.0.1, Port=5000, Device ID=0 등을 사용할 수 있으나, 실제 값은 Simulator 선정 및 설비 사양서 확보 후 확정한다.
 
 ## 5. 대상 환경
 
 | 항목 | 값 | 비고 |
 |------|------|------|
-| 운영체제 | Windows 10 이상 | 대상 PC 확인 후 확정 |
+| 운영체제 | TBD | 대상 PC 확인 후 확정 |
 | 플랫폼 | x86 또는 x64 | 통신 SDK와 대상 PC에 맞춰 확정. TBD |
 | 런타임 | .NET Framework 4.7.2 | |
 | UI | WPF / MVVM | |
@@ -101,7 +97,7 @@ HSMS Connect
 | Timer | 설명 | 기본값 | 비고 |
 |-------|------|--------|------|
 | T3 | Reply Timeout | 45초 | 설비 사양서 확인 후 조정 |
-| T5 | Connect Separation Timeout | 10초 | |
+| T5 | Connect Separation Timeout | 10초 | 연결 실패 후 다음 시도까지의 대기 시간. TCP Connect Timeout과 구분 |
 | T6 | Control Transaction Timeout | 5초 | |
 | T7 | Not Selected Timeout | 10초 | |
 | T8 | Network Intercharacter Timeout | 5초 | |

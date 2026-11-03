@@ -24,9 +24,9 @@
        ▲                              │
        │                    성공 ──────┤
        │                              ▼
-       │              T5 Timeout   Connected
-       │◄──────────────────────────── │
-       │                              │
+       │         TCP 연결 실패     Connected
+       │◄───────── (T5 대기 후        │
+       │           재시도)             │
        │                    Select.req 전송
        │                              │
        │                              ▼
@@ -45,9 +45,9 @@
 
 | 현재 상태 | 이벤트 | 다음 상태 | 비고 |
 |-----------|--------|-----------|------|
-| Disconnected | Connect 요청 | Connecting | Host Active 모드 |
+| Disconnected | Connect 요청 | Connecting | Host/Equipment 역할은 TBD |
 | Connecting | TCP 연결 성공 | Connected | |
-| Connecting | TCP 연결 실패 / T5 Timeout | Disconnected | 재접속 정책에 따라 재시도 |
+| Connecting | TCP 연결 실패 | Disconnected | T5 대기 후 재시도 (아래 참고) |
 | Connected | Select.req 전송 → Select.rsp 수신 (성공) | Selected | |
 | Connected | Select 실패 / T6 Timeout | Disconnected | |
 | Connected | T7 Timeout (Not Selected) | Disconnected | |
@@ -63,10 +63,20 @@
 - Selected 상태에서 주기적으로 Linktest.req를 전송하여 연결 유지를 확인한다.
 - Linktest.rsp가 T6 이내에 수신되지 않으면 연결 단절로 판단한다.
 
+### T5 Connect Separation
+
+T5는 개별 TCP 연결 시도의 Timeout이 아니라, 실패한 연결 시도와 다음 연결 시도 사이의 대기 시간(Connect Separation Time)이다.
+
+```text
+TCP 연결 실패 → Disconnected → T5 대기 → 다음 Connect 요청 → Connecting
+```
+
+개별 TCP 연결 시도의 제한 시간은 OS 또는 SDK의 TCP Connect Timeout이며, T5와 구분한다.
+
 ### 재접속 정책
 
-- 연결 단절 시 Auto Reconnect가 활성화되어 있으면 설정된 간격으로 재접속을 시도한다.
-- 재접속 간격은 Equipment Profile의 Reconnect Interval을 따른다.
+- 연결 단절 시 Auto Reconnect가 활성화되어 있으면 T5 대기 후 재접속을 시도한다.
+- 재접속 간격은 T5를 기본으로 하며, Equipment Profile의 Reconnect Interval로 조정할 수 있다.
 - 재접속 시 HSMS 상태는 Disconnected에서 다시 시작한다.
 
 ## 3. GEM Communication 상태 전이
@@ -142,10 +152,23 @@
 
 ### 상태별 명령 허용 정책
 
+Host가 시작하는 명령(Host Initiated)과 Equipment가 보낸 Primary에 대한 Secondary 응답(Protocol Response)을 구분한다.
+
+#### Host Initiated 명령
+
 | 상태 | 허용 명령 | 비고 |
 |------|-----------|------|
-| Equipment Offline | S1F17 (Online 요청) | 다른 SECS-II 명령 차단 |
-| Equipment Online | S2F41, S5F2, S6F12 등 | 전체 SECS-II 명령 사용 가능 |
+| Equipment Offline | S1F17 (Online 요청) | Host가 시작하는 다른 SECS-II 명령은 차단 |
+| Equipment Online | S2F41 등 | 전체 Host Initiated 명령 사용 가능 |
+
+#### Protocol Response (수신 Primary에 대한 Secondary 응답)
+
+| 상태 | 동작 | 비고 |
+|------|------|------|
+| Equipment Offline | 수신한 S5F1에 S5F2 응답, S6F11에 S6F12 응답 전송 | 프로토콜 규약상 Secondary 응답은 상태와 무관하게 전송해야 할 수 있음 |
+| Equipment Online | 수신한 Primary에 대해 정상 Secondary 응답 전송 | |
+
+> **TBD**: Offline 상태에서 Equipment가 보낸 S5F1, S6F11 등에 대한 Secondary 응답 정책은 설비 Interface Specification 확보 후 확정한다. 설비에 따라 Offline에서도 응답이 필요하거나, 특정 메시지만 허용할 수 있다.
 
 ### 상태 초기화 조건
 
@@ -157,7 +180,7 @@
 | Timer | 적용 구간 | 기본값 | 동작 |
 |-------|-----------|--------|------|
 | T3 | SECS-II Reply 대기 | 45초 | Timeout 시 해당 트랜잭션 실패 |
-| T5 | Connect Separation | 10초 | 연결 재시도 간격 |
+| T5 | Connect Separation | 10초 | 연결 실패 후 다음 연결 시도까지의 대기 시간. 개별 TCP 연결 시도의 Timeout과 구분 |
 | T6 | Control Transaction | 5초 | Select/Deselect/Linktest 응답 대기 |
 | T7 | Not Selected | 10초 | Connected 상태에서 Select 없으면 Disconnect |
 | T8 | Network Intercharacter | 5초 | 메시지 수신 중 바이트 간격 초과 시 메시지 폐기 |
