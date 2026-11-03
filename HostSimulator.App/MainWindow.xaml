@@ -1,0 +1,11 @@
+<Window x:Class="HostSimulator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Host Simulator" Width="800" Height="600">
+    <Grid>
+        <TextBlock Text="Host Simulator"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   FontSize="24" />
+    </Grid>
+</Window>

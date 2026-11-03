@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>HostSimulator.Application</RootNamespace>
+    <AssemblyName>HostSimulator.Application</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="IHostService.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HostSimulator.Domain\HostSimulator.Domain.csproj" />
+  </ItemGroup>
+</Project>

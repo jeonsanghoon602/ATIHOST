@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>HostSimulator.App</RootNamespace>
+    <AssemblyName>HostSimulator.App</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HostSimulator.Application\HostSimulator.Application.csproj" />
+    <ProjectReference Include="..\HostSimulator.Infrastructure\HostSimulator.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
