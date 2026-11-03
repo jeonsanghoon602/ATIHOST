@@ -139,6 +139,49 @@ Backlog
 - [ ] 실제 설비 없이 실행할 Equipment Simulator 환경을 준비했다.
 - [ ] 로그에 민감한 생산 정보가 포함되지 않는지 확인했다.
 
+## 빌드 및 테스트
+
+### 사전 조건
+
+- .NET SDK 6.0 이상 (SDK-style csproj로 net472 대상 빌드)
+- .NET Framework 4.7.2 Developer Pack 또는 Targeting Pack (Visual Studio Build Tools에 포함되거나 별도 설치)
+
+### NuGet 패키지 복원
+
+```bash
+dotnet restore HostSimulator.sln
+```
+
+### Debug 빌드
+
+```bash
+dotnet build HostSimulator.sln -c Debug -p:Platform=x64 --no-restore -m:1
+```
+
+### Release 빌드
+
+```bash
+dotnet build HostSimulator.sln -c Release -p:Platform=x64 --no-restore -m:1
+```
+
+### 테스트 실행
+
+```bash
+dotnet test HostSimulator.Tests/HostSimulator.Tests.csproj -c Debug -p:Platform=x64 --no-build
+dotnet test HostSimulator.Tests/HostSimulator.Tests.csproj -c Release -p:Platform=x64 --no-build
+```
+
+### 프로젝트 참조 구조
+
+```text
+App → Application → Domain
+App → Infrastructure → Application, Domain
+Protocol → Domain
+Tests → Application, Domain, Infrastructure, Protocol
+```
+
+App은 Protocol을 직접 참조하지 않는다. 모든 프로젝트의 Platform Target은 x64이다.
+
 ## 참고
 
 - [.NET Framework 4.7.2 버전 및 OS 호환성](https://learn.microsoft.com/dotnet/framework/install/versions-and-dependencies)

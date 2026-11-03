@@ -1,0 +1,51 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.Domain", "HostSimulator.Domain\HostSimulator.Domain.csproj", "{66EEF0B3-2201-4DC3-93F1-0F457FD6B616}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.Application", "HostSimulator.Application\HostSimulator.Application.csproj", "{29E702BC-F6BE-4B64-88C0-5CFD4D73FD13}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.Protocol", "HostSimulator.Protocol\HostSimulator.Protocol.csproj", "{CDA6C048-CE80-4866-AE81-40B7328E2302}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.Infrastructure", "HostSimulator.Infrastructure\HostSimulator.Infrastructure.csproj", "{472AE673-2B91-4942-9069-887F670CDC14}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.App", "HostSimulator.App\HostSimulator.App.csproj", "{EE2AEEA2-59BE-4BB8-A103-1D50369B467D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.Tests", "HostSimulator.Tests\HostSimulator.Tests.csproj", "{C4455040-2EE6-4A03-818B-530499E6694B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{66EEF0B3-2201-4DC3-93F1-0F457FD6B616}.Debug|x64.ActiveCfg = Debug|x64
+		{66EEF0B3-2201-4DC3-93F1-0F457FD6B616}.Debug|x64.Build.0 = Debug|x64
+		{66EEF0B3-2201-4DC3-93F1-0F457FD6B616}.Release|x64.ActiveCfg = Release|x64
+		{66EEF0B3-2201-4DC3-93F1-0F457FD6B616}.Release|x64.Build.0 = Release|x64
+		{29E702BC-F6BE-4B64-88C0-5CFD4D73FD13}.Debug|x64.ActiveCfg = Debug|x64
+		{29E702BC-F6BE-4B64-88C0-5CFD4D73FD13}.Debug|x64.Build.0 = Debug|x64
+		{29E702BC-F6BE-4B64-88C0-5CFD4D73FD13}.Release|x64.ActiveCfg = Release|x64
+		{29E702BC-F6BE-4B64-88C0-5CFD4D73FD13}.Release|x64.Build.0 = Release|x64
+		{CDA6C048-CE80-4866-AE81-40B7328E2302}.Debug|x64.ActiveCfg = Debug|x64
+		{CDA6C048-CE80-4866-AE81-40B7328E2302}.Debug|x64.Build.0 = Debug|x64
+		{CDA6C048-CE80-4866-AE81-40B7328E2302}.Release|x64.ActiveCfg = Release|x64
+		{CDA6C048-CE80-4866-AE81-40B7328E2302}.Release|x64.Build.0 = Release|x64
+		{472AE673-2B91-4942-9069-887F670CDC14}.Debug|x64.ActiveCfg = Debug|x64
+		{472AE673-2B91-4942-9069-887F670CDC14}.Debug|x64.Build.0 = Debug|x64
+		{472AE673-2B91-4942-9069-887F670CDC14}.Release|x64.ActiveCfg = Release|x64
+		{472AE673-2B91-4942-9069-887F670CDC14}.Release|x64.Build.0 = Release|x64
+		{EE2AEEA2-59BE-4BB8-A103-1D50369B467D}.Debug|x64.ActiveCfg = Debug|x64
+		{EE2AEEA2-59BE-4BB8-A103-1D50369B467D}.Debug|x64.Build.0 = Debug|x64
+		{EE2AEEA2-59BE-4BB8-A103-1D50369B467D}.Release|x64.ActiveCfg = Release|x64
+		{EE2AEEA2-59BE-4BB8-A103-1D50369B467D}.Release|x64.Build.0 = Release|x64
+		{C4455040-2EE6-4A03-818B-530499E6694B}.Debug|x64.ActiveCfg = Debug|x64
+		{C4455040-2EE6-4A03-818B-530499E6694B}.Debug|x64.Build.0 = Debug|x64
+		{C4455040-2EE6-4A03-818B-530499E6694B}.Release|x64.ActiveCfg = Release|x64
+		{C4455040-2EE6-4A03-818B-530499E6694B}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+EndGlobal

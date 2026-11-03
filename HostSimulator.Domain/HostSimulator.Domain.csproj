@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>HostSimulator.Domain</RootNamespace>
+    <AssemblyName>HostSimulator.Domain</AssemblyName>
+  </PropertyGroup>
+</Project>
