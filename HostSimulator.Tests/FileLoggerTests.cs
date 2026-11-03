@@ -74,5 +74,21 @@ namespace HostSimulator.Tests
         {
             Assert.Throws<ArgumentNullException>(() => new FileLogger(null));
         }
+
+        [Fact]
+        public void Constructor_ThrowsIOExceptionForInvalidPath()
+        {
+            Directory.CreateDirectory(_tempDir);
+            var blocker = Path.Combine(_tempDir, "blocker");
+            File.WriteAllText(blocker, "x");
+            var invalidPath = Path.Combine(blocker, "subdir");
+            Assert.ThrowsAny<IOException>(() => new FileLogger(invalidPath));
+        }
+
+        [Fact]
+        public void Constructor_ThrowsArgumentExceptionForEmptyPath()
+        {
+            Assert.ThrowsAny<ArgumentException>(() => new FileLogger(string.Empty));
+        }
     }
 }

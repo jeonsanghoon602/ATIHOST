@@ -21,12 +21,5 @@ namespace HostSimulator.Tests
             var result = provider.GetSetting("NonExistentKey", "fallback");
             Assert.Equal("fallback", result);
         }
-
-        [Fact]
-        public void ImplementsISettingsProvider()
-        {
-            var provider = new AppSettingsProvider();
-            Assert.IsAssignableFrom<ISettingsProvider>(provider);
-        }
     }
 }

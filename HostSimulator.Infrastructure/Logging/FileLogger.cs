@@ -12,10 +12,7 @@ namespace HostSimulator.Infrastructure.Logging
         public FileLogger(string logDirectory)
         {
             _logDirectory = logDirectory ?? throw new ArgumentNullException(nameof(logDirectory));
-            if (!Directory.Exists(_logDirectory))
-            {
-                Directory.CreateDirectory(_logDirectory);
-            }
+            Directory.CreateDirectory(_logDirectory);
         }
 
         public void Info(string message) => WriteLog("INFO", message);
