@@ -47,7 +47,7 @@ HSMS 연결부터 Remote Command 전송, Event Report 수신까지 전체 정상
 
 ### RCMD 및 CEID
 
-> **TBD**: 구체적 RCMD 이름, Parameter, CEID 값은 Interface Specification 확보 후 확정한다. 시험 시 Equipment Simulator의 기본 RCMD와 CEID를 사용한다.
+> **TBD**: 구체적 RCMD 이름, Parameter, CEID 값은 Interface Specification 확보 후 확정한다. Equipment Simulator 선정 후 지원 RCMD/CEID를 확인하여 확정한다.
 
 ## 4. Scenario B — 오류 흐름
 

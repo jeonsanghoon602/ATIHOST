@@ -75,8 +75,9 @@ TCP 연결 실패 → Disconnected → T5 대기 → 다음 Connect 요청 → C
 
 ### 재접속 정책
 
-- 연결 단절 시 Auto Reconnect가 활성화되어 있으면 T5 대기 후 재접속을 시도한다.
-- 재접속 간격은 T5를 기본으로 하며, Equipment Profile의 Reconnect Interval로 조정할 수 있다.
+- 연결 단절 시 Auto Reconnect가 활성화되어 있으면 재접속을 시도한다.
+- 유효 재접속 대기 시간은 `max(T5, Reconnect Interval)`로 한다. T5는 연결 시도 사이의 최소 대기 시간이므로 Reconnect Interval이 T5보다 짧을 수 없다.
+- Equipment Profile에서 Reconnect Interval을 설정할 때 `Reconnect Interval >= T5`를 검증한다.
 - 재접속 시 HSMS 상태는 Disconnected에서 다시 시작한다.
 
 ## 3. GEM Communication 상태 전이
@@ -86,7 +87,7 @@ TCP 연결 실패 → Disconnected → T5 대기 → 다음 Connect 요청 → C
 | 상태 | 설명 |
 |------|------|
 | Communication Not Established | HSMS Selected 상태이나 GEM Communication 미수립 |
-| Communication Established (Wait CRA) | S1F13 전송 후 S1F14 대기 중 |
+| Communication Establishing (Wait CRA) | S1F13 전송 후 S1F14 대기 중 |
 | Communicating | S1F14 COMMACK=0 수신, Communication 수립 완료 |
 
 ### 전이 다이어그램
@@ -99,7 +100,7 @@ TCP 연결 실패 → Disconnected → T5 대기 → 다음 Connect 요청 → C
        │
        │  S1F13 전송
        ▼
-  Wait CRA (S1F14 대기)
+  Establishing / Wait CRA (S1F14 대기)
        │
        ├─ S1F14 COMMACK=0 ──► Communicating
        │
@@ -112,10 +113,10 @@ TCP 연결 실패 → Disconnected → T5 대기 → 다음 Connect 요청 → C
 
 | 현재 상태 | 이벤트 | 다음 상태 |
 |-----------|--------|-----------|
-| Comm Not Established | S1F13 전송 | Wait CRA |
-| Wait CRA | S1F14 COMMACK=0 | Communicating |
-| Wait CRA | S1F14 COMMACK=1 | Comm Not Established |
-| Wait CRA | T3 Timeout | Comm Not Established |
+| Comm Not Established | S1F13 전송 | Establishing (Wait CRA) |
+| Establishing (Wait CRA) | S1F14 COMMACK=0 | Communicating |
+| Establishing (Wait CRA) | S1F14 COMMACK=1 | Comm Not Established |
+| Establishing (Wait CRA) | T3 Timeout | Comm Not Established |
 | Communicating | HSMS 연결 단절 | Comm Not Established |
 | 모든 GEM 상태 | HSMS Disconnected | Comm Not Established |
 

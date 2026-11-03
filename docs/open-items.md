@@ -11,9 +11,9 @@
 | ID | 항목 | 현재 상태 | 확인 담당자 | 예상 확인 시점 | 영향 범위 |
 |----|------|-----------|------------|----------------|-----------|
 | OI-001 | Interface Specification 확보 | 미확보 | 설비 담당자 / PM | HOST-002 시작 전 | 전체 메시지 카탈로그, CEID/VID/ALID/RCMD 확정 |
-| OI-002 | Host/Equipment Active/Passive 역할 | 기본값(Host=Active) 가정 | 설비 담당자 | Interface Specification 확보 시 | HSMS 연결 방향, Equipment Profile 설정 |
-| OI-003 | Equipment IP, Port | 미확정 (시뮬레이터: 127.0.0.1:5000) | 네트워크/설비 담당자 | 실제 설비 시험 전 | Equipment Profile 설정 |
-| OI-004 | Device ID / Session ID | 미확정 (시뮬레이터: 0) | 설비 담당자 | Interface Specification 확보 시 | HSMS Select, 메시지 교환 |
+| OI-002 | Host/Equipment Active/Passive 역할 | 미확정 | 설비 담당자 | Interface Specification 확보 시 | HSMS 연결 방향, Equipment Profile 설정 |
+| OI-003 | Equipment IP, Port | 미확정 | 네트워크/설비 담당자 | 실제 설비 시험 전 | Equipment Profile 설정 |
+| OI-004 | Device ID / Session ID | 미확정 | 설비 담당자 | Interface Specification 확보 시 | HSMS Select, 메시지 교환 |
 
 ### 2.2 메시지 관련
 
@@ -30,7 +30,7 @@
 
 | ID | 항목 | 현재 상태 | 확인 담당자 | 예상 확인 시점 | 영향 범위 |
 |----|------|-----------|------------|----------------|-----------|
-| OI-011 | 대상 PC Windows 버전 | Windows 10 이상 가정 | 배포 담당자 | 배포 계획 수립 시 | .NET Framework 호환성 |
+| OI-011 | 대상 PC Windows 버전 | 미확정 | 배포 담당자 | 배포 계획 수립 시 | .NET Framework 호환성 |
 | OI-012 | x86/x64 Platform Target | 미확정 | 통신 SDK/배포 담당자 | HOST-003 SDK PoC 시 | 빌드 설정, 배포 패키지 |
 | OI-013 | Equipment Simulator 선정 | 미선정 | 개발팀 | HOST-003 시작 전 | SDK PoC, 자동 시험 환경 |
 
