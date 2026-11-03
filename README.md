@@ -22,16 +22,18 @@
 ## 권장 기술 스택
 
 - Language: C#
-- Runtime: .NET 10 LTS
+- Runtime: .NET Framework 4.7.2
 - UI: WPF
 - Pattern: MVVM
-- HSMS/SECS/GEM: Secs4Net 또는 검증된 상용 SDK
+- HSMS/SECS/GEM: Secs4Net 2.4.4 버전 고정 또는 .NET Framework 4.7.2 호환 상용 SDK
 - Equipment Profile: JSON
 - Test Scenario: YAML 또는 JSON
 - Test: xUnit
 - Log: 구조화 파일, 필요 시 SQLite
 
 새 Host Simulator는 기존 C++Builder 설비 프로그램과 분리된 독립 프로그램으로 개발하는 것을 기본 방향으로 한다.
+
+최신 Secs4Net 3.x는 .NET 8/10 대상이므로 이 프로젝트에서 직접 사용할 수 없다. Secs4Net을 선택하면 `netstandard2.0`을 제공하는 2.4.4를 고정하여 호환성과 장시간 통신 안정성을 검증한다. 신규 버전으로 자동 업데이트하지 않는다.
 
 ```text
 기존 BCB Equipment 프로그램
@@ -75,7 +77,7 @@ WPF UI
 → Application Service
 → Scenario Runner
 → Protocol Adapter
-→ Secs4Net 또는 상용 SDK
+→ Secs4Net 2.4.4 또는 4.7.2 호환 상용 SDK
 → Equipment
 ```
 
@@ -112,6 +114,9 @@ Backlog
 - 사양서에 없는 동작을 임의로 결정하지 않는다.
 - 성공 판정에는 빌드, 테스트 또는 통신 로그와 같은 증거를 남긴다.
 - 통신 SDK는 Adapter 뒤에 격리한다.
+- 모든 프로젝트의 Target Framework를 `.NET Framework 4.7.2`로 통일한다.
+- NuGet 패키지의 .NET Framework 4.7.2 호환성을 설치 전에 확인한다.
+- 통신 SDK와 대상 PC에 맞춰 x86/x64 Platform Target을 명시한다.
 - 실제 장비 시험 전 Equipment Simulator로 검증한다.
 - 실제 생산 제어 기능은 별도 승인 없이 실행하지 않는다.
 - 기존 BCB `.cpp`, `.h`, `.dfm`을 수정할 때는 CP949/Windows-949 인코딩을 유지한다.
@@ -119,6 +124,7 @@ Backlog
 ## 문서
 
 - [Host Simulator 개발 워크플로우](./HOST_SIMULATOR_WORKFLOW.md)
+- [단계별 개발 계획](./DEVELOPMENT_STEPS.md)
 - [에이전트 작업 요청서 템플릿](./AGENT_WORK_REQUEST_TEMPLATE.md)
 
 ## 작업 시작 체크리스트
@@ -134,7 +140,8 @@ Backlog
 
 ## 참고
 
-- [.NET 지원 정책](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)
+- [.NET Framework 4.7.2 버전 및 OS 호환성](https://learn.microsoft.com/dotnet/framework/install/versions-and-dependencies)
 - [WPF 문서](https://learn.microsoft.com/dotnet/desktop/wpf/)
 - [Secs4Net](https://github.com/mkjeff/secs4net)
+- [Secs4Net 2.4.4 NuGet](https://www.nuget.org/packages/Secs4Net/2.4.4)
 
