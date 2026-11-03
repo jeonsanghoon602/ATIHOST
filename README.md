@@ -126,6 +126,7 @@ Backlog
 - [Host Simulator 개발 워크플로우](./HOST_SIMULATOR_WORKFLOW.md)
 - [단계별 개발 계획](./DEVELOPMENT_STEPS.md)
 - [에이전트 작업 요청서 템플릿](./AGENT_WORK_REQUEST_TEMPLATE.md)
+- [GitHub Issue 및 Pull Request 템플릿](./ISSUE_PR_TEMPLATES.md)
 
 ## 작업 시작 체크리스트
 

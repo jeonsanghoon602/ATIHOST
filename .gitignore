@@ -1,0 +1,40 @@
+# Visual Studio / .NET
+.vs/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Tt]est[Rr]esult*/
+packages/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+*.snupkg
+*.log
+
+# Build and coverage output
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+artifacts/
+coverage/
+*.coverage
+*.coveragexml
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+*.secrets.json
+appsettings.local.json
+equipment-profile.local.json
+
+# Operating system / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+*~

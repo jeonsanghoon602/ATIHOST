@@ -1,0 +1,32 @@
+* text=auto
+
+# Repository documentation and portable configuration
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Visual Studio and .NET Framework files
+*.sln text eol=crlf
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.config text eol=crlf
+*.xaml text eol=crlf
+
+# Existing BCB sources are CP949/Windows-949. Git may normalize line endings,
+# but must not apply a working-tree encoding conversion to these files.
+*.cpp text eol=crlf
+*.h text eol=crlf
+*.dfm text eol=crlf
+
+# Binary assets
+*.dll binary
+*.exe binary
+*.lib binary
+*.obj binary
+*.pdb binary
+*.res binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
