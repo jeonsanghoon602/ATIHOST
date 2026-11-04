@@ -32,7 +32,7 @@
 |----|------|-----------|------------|----------------|-----------|
 | OI-011 | 대상 PC Windows 버전 | 미확정 | 배포 담당자 | 배포 계획 수립 시 | .NET Framework 호환성 |
 | OI-012 | x86/x64 Platform Target | **확정: x64** | 통신 SDK/배포 담당자 | HOST-003 SDK PoC에서 확정 | 빌드 설정, 배포 패키지 |
-| OI-013 | Equipment Simulator 선정 | **확정: Linkgenesis XGem300Pro v3.x (HOST-003 로컬 시험용)** | 개발팀 | HOST-003 SDK PoC에서 확정 | SDK PoC, 자동 시험 환경 |
+| OI-013 | Equipment Simulator 선정 | **확정: Root_ROE2.exe (HOST-003 최종 로컬 시험용)** | 개발팀 | HOST-003 SDK PoC에서 확정 | SDK PoC, 자동 시험 환경 |
 
 ### 2.4 개발 관련
 
@@ -53,5 +53,5 @@
 | 날짜 | ID | 확정 내용 | 확인자 |
 |------|------|-----------|--------|
 | 2026-11-04 | OI-012 | x64 Platform Target 확정 (HOST-003 SDK PoC) | 개발팀 |
-| 2026-11-04 | OI-013 | HOST-003 로컬 시험용 Equipment Simulator로 Linkgenesis XGem300Pro v3.x 선정 | 개발팀 |
+| 2026-11-04 | OI-013 | XGem300Pro로 예비 시험 후 최종 로컬 시험용 Equipment Simulator를 Root_ROE2.exe로 변경. Host=Active, IP=127.0.0.1, Port=6000, Device ID=1 | 사용자 / 개발팀 |
 | 2026-11-04 | OI-014 | Secs4Net 2.4.4 선정 확정 (HOST-003 SDK PoC, docs/secs4net-sdk-evaluation.md 참조) | 개발팀 |

@@ -10,16 +10,16 @@
 
 | 항목 | 값 | 비고 |
 |------|------|------|
-| 시험 환경 | TBD | Equipment Simulator 선정 후 확정 |
-| Host 역할 | TBD | Interface Specification 확보 후 확정 |
-| Equipment 역할 | TBD | Interface Specification 확보 후 확정 |
-| Device ID | TBD | Interface Specification 확보 후 확정 |
+| 시험 환경 | Root_ROE2.exe | HOST-003 로컬 시험용 |
+| Host 역할 | Active | 로컬 Simulator 설정 |
+| Equipment 역할 | Passive | 로컬 Simulator 설정 |
+| Device ID | 1 | 로컬 Simulator 설정 |
 | T3 | TBD | SEMI 표준 기본값 45초 참고 |
 | T5 | TBD | SEMI 표준 기본값 10초 참고 |
 | T6 | TBD | SEMI 표준 기본값 5초 참고 |
 | T7 | TBD | SEMI 표준 기본값 10초 참고 |
 
-> **비규범적 예시**: Simulator 환경에서는 IP=127.0.0.1, Port=5000, Device ID=0, Host=Active, Equipment=Passive 등을 사용할 수 있으나, 실제 값은 Simulator 선정 및 설비 사양서 확보 후 확정한다.
+로컬 Simulator 접속 주소는 `127.0.0.1:6000`이다. 실제 설비의 역할과 접속 정보는 Interface Specification 확보 후 별도로 확정한다.
 
 ## 3. Scenario A — 정상 흐름
 

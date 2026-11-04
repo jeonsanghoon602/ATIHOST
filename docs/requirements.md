@@ -33,7 +33,7 @@
 
 개발 및 시험 단계에서는 Equipment Simulator를 사용한다. Simulator 선정 후 접속 정보를 확정한다.
 
-> **비규범적 예시**: Simulator 환경에서는 IP=127.0.0.1, Port=5000, Device ID=0 등을 사용할 수 있으나, 실제 값은 Simulator 선정 및 설비 사양서 확보 후 확정한다.
+HOST-003 로컬 시험은 `Root_ROE2.exe`를 사용하며 IP=`127.0.0.1`, Port=`6000`, Device ID=`1`, Host=`Active`, Equipment Simulator=`Passive`로 확정했다. 이 값은 로컬 Simulator 전용이며 실제 설비 접속 정보는 아니다.
 
 ## 5. 대상 환경
 

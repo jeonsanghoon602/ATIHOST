@@ -102,11 +102,23 @@ The PoC does **not** include:
 
 ## 9. Console PoC Invocation
 
+Final HOST-003 local simulator configuration:
+
+| Item | Value |
+|------|-------|
+| Equipment Simulator | `C:\Users\sanghoon\Documents\GitHub\ATI_Calculator_jsh\PR_ROE2_JSH\Root_ROE2\bin\x64\Release\Root_ROE2.exe` |
+| IP / Port | `127.0.0.1:6000` |
+| Device ID | `1` |
+| Host role | Active |
+| Equipment Simulator role | Passive |
+
+These values apply only to the local simulator. Production equipment settings remain pending the Interface Specification.
+
 ```
 dotnet run --project HostSimulator.Poc -c Debug -p:Platform=x64 -- <ip> <port> <active|passive> <deviceId> <cycles> <timeoutSeconds> <cycleDelaySeconds>
 ```
 
-Example with the tested local XGem simulator on port 6000 and its observed 12-second re-listen delay:
+The earlier XGem test used the following command and its observed 12-second re-listen delay:
 
 ```
 dotnet run --project HostSimulator.Poc -c Debug -p:Platform=x64 -- 127.0.0.1 6000 active 1 100 10 12
@@ -114,14 +126,16 @@ dotnet run --project HostSimulator.Poc -c Debug -p:Platform=x64 -- 127.0.0.1 600
 
 All seven arguments are required. No defaults are assumed. `cycleDelaySeconds` is the pause between cycles (>= 0); some simulators need time to re-listen after disconnect. Exit code 0 = all cycles passed; 1 = usage error; 2 = one or more cycles failed.
 
+The Root_ROE2 cycle delay has not been measured yet. Use the required explicit `cycleDelaySeconds` argument after measuring its re-listen behavior; do not assume the XGem value applies.
+
 ## 10. Open Items
 
 | Item | Status | Reference |
 |------|--------|-----------|
-| Equipment Simulator selection | Verified for HOST-003 local test: Linkgenesis XGem300Pro v3.x | OI-013 |
+| Equipment Simulator selection | Final HOST-003 local test: Root_ROE2.exe; XGem300Pro retained as preliminary-test history | OI-013 |
 | Live TCP connection test | Partial: Selected and disconnect verified; final cleanup fix needs retest | — |
 | 100-cycle test with live simulator | Pending final rerun | — |
 | Memory profiling under sustained load | Pending final 100-cycle run | — |
-| Active/Passive role confirmation | Pending | OI-002 |
+| Active/Passive role confirmation | Local simulator confirmed: Host Active / Equipment Passive; production equipment pending | OI-002 |
 | SecsGemOptions.DeviceId exact type | Verified: `ushort` (source confirmed) | — |
 | Secs4NetAdapter API correctness | Verified: `HsmsConnection(IOptions, ISecsGemLogger)`, `void Start(CancellationToken)` — Debug/Release build and PoC execution confirmed | — |
