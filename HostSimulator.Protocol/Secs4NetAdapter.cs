@@ -18,7 +18,7 @@ namespace HostSimulator.Protocol
 
         public ProtocolConnectionState State { get; private set; } = ProtocolConnectionState.Disconnected;
 
-        public event EventHandler<ProtocolConnectionState> StateChanged;
+        public event EventHandler<StateChangedEventArgs> StateChanged;
 
         public Secs4NetAdapter(Domain.ILogger logger)
         {
@@ -38,7 +38,6 @@ namespace HostSimulator.Protocol
 
             HsmsConnection conn;
             CancellationTokenSource lifetimeCts;
-            // RunContinuationsAsynchronously: Secs4Net fires ConnectionChanged mid-state-transition; inline continuation would Disconnect before the SDK finishes its timer cleanup.
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             lock (_lock)
@@ -48,7 +47,7 @@ namespace HostSimulator.Protocol
                 if (_connection != null)
                     throw new InvalidOperationException("Already connected. Disconnect first.");
 
-                SetState(ProtocolConnectionState.Connecting);
+                SetState(ProtocolConnectionState.Connecting, StateChangeReason.UserRequest);
 
                 var options = Options.Create(new SecsGemOptions
                 {
@@ -56,6 +55,12 @@ namespace HostSimulator.Protocol
                     Port = parameters.Port,
                     IsActive = parameters.IsActive,
                     DeviceId = (ushort)parameters.DeviceId,
+                    T3 = parameters.T3Seconds * 1000,
+                    T5 = parameters.T5Seconds * 1000,
+                    T6 = parameters.T6Seconds * 1000,
+                    T7 = parameters.T7Seconds * 1000,
+                    T8 = parameters.T8Seconds * 1000,
+                    LinkTestInterval = parameters.LinkTestIntervalSeconds * 1000,
                 });
 
                 lifetimeCts = new CancellationTokenSource();
@@ -112,7 +117,7 @@ namespace HostSimulator.Protocol
                 _lifetimeCts = null;
             }
 
-            SetState(ProtocolConnectionState.Disconnecting);
+            SetState(ProtocolConnectionState.Disconnecting, StateChangeReason.UserRequest);
 
             if (lifetimeCts != null)
             {
@@ -126,7 +131,39 @@ namespace HostSimulator.Protocol
                 await conn.DisposeAsync().ConfigureAwait(false);
             }
 
-            SetState(ProtocolConnectionState.Disconnected);
+            SetState(ProtocolConnectionState.Disconnected, StateChangeReason.UserRequest);
+        }
+
+        public Task<bool> LinktestAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+        {
+            HsmsConnection conn;
+            lock (_lock)
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException(nameof(Secs4NetAdapter));
+                conn = _connection;
+            }
+
+            if (conn == null || State != ProtocolConnectionState.Selected)
+            {
+                _logger.Warn("Linktest requested but not in Selected state.");
+                return Task.FromResult(false);
+            }
+
+            // Secs4Net 2.4.4 handles Linktest internally via LinkTestEnabled.
+            // Verify the connection is alive by confirming the SDK state is Selected.
+            var sdkSelected = conn.State == ConnectionState.Selected;
+            if (sdkSelected)
+            {
+                conn.LinkTestEnabled = true;
+                _logger.Info("Linktest: connection is Selected, periodic LinkTest is enabled.");
+            }
+            else
+            {
+                _logger.Warn($"Linktest: SDK state is {conn.State}, not Selected.");
+            }
+
+            return Task.FromResult(sdkSelected);
         }
 
         public void Dispose()
@@ -156,34 +193,66 @@ namespace HostSimulator.Protocol
                 conn.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
 
-            SetState(ProtocolConnectionState.Disconnected);
+            SetState(ProtocolConnectionState.Disconnected, StateChangeReason.Disposed);
         }
 
         private void OnConnectionChanged(object sender, ConnectionState state)
         {
-            _logger.Info("ConnectionChanged: " + state);
-            SetState(MapState(state));
+            var mapped = MapState(state);
+            var reason = MapReason(state);
+            _logger.Info($"ConnectionChanged: {state} -> {mapped} ({reason})");
+            SetState(mapped, reason);
+
+            if (state == ConnectionState.Selected)
+            {
+                var conn = _connection;
+                if (conn != null)
+                    conn.LinkTestEnabled = true;
+            }
         }
 
-        internal static ProtocolConnectionState MapState(ConnectionState secsState)
+        public static ProtocolConnectionState MapState(ConnectionState secsState)
         {
             switch (secsState)
             {
                 case ConnectionState.Connecting:
+                    return ProtocolConnectionState.Connecting;
                 case ConnectionState.Retry:
                     return ProtocolConnectionState.Connecting;
                 case ConnectionState.Connected:
-                case ConnectionState.Selected:
                     return ProtocolConnectionState.Connected;
+                case ConnectionState.Selected:
+                    return ProtocolConnectionState.Selected;
                 default:
                     return ProtocolConnectionState.Disconnected;
             }
         }
 
-        private void SetState(ProtocolConnectionState newState)
+        public static StateChangeReason MapReason(ConnectionState secsState)
         {
+            switch (secsState)
+            {
+                case ConnectionState.Connecting:
+                    return StateChangeReason.UserRequest;
+                case ConnectionState.Connected:
+                    return StateChangeReason.ConnectionEstablished;
+                case ConnectionState.Selected:
+                    return StateChangeReason.SelectCompleted;
+                case ConnectionState.Retry:
+                    return StateChangeReason.ReconnectAttempt;
+                default:
+                    return StateChangeReason.CommunicationError;
+            }
+        }
+
+        private void SetState(ProtocolConnectionState newState, StateChangeReason reason)
+        {
+            var previous = State;
+            if (previous == newState)
+                return;
             State = newState;
-            StateChanged?.Invoke(this, newState);
+            _logger.Info($"State: {previous} -> {newState} ({reason})");
+            StateChanged?.Invoke(this, new StateChangedEventArgs(previous, newState, reason));
         }
     }
 }

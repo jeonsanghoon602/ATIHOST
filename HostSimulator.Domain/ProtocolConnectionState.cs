@@ -5,6 +5,7 @@ namespace HostSimulator.Domain
         Disconnected,
         Connecting,
         Connected,
+        Selected,
         Disconnecting
     }
 }
