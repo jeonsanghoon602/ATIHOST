@@ -80,6 +80,9 @@ namespace HostSimulator.Protocol
             {
                 if (state == ConnectionState.Selected)
                     tcs.TrySetResult(true);
+                else if (state == ConnectionState.Retry)
+                    tcs.TrySetException(new InvalidOperationException(
+                        "Connection entered Retry during initial connection."));
             }
 
             conn.ConnectionChanged += onConnected;
@@ -105,7 +108,7 @@ namespace HostSimulator.Protocol
 
                 if (!cancellationToken.IsCancellationRequested)
                 {
-                    _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.T7Timeout);
+                    _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.CommunicationError);
                     throw new TimeoutException(
                         $"Connection did not reach Selected state within {timeout.TotalSeconds}s.");
                 }
@@ -310,6 +313,11 @@ namespace HostSimulator.Protocol
             }
         }
 
+        // Secs4Net 2.4.x does not expose per-event detail for Retry:
+        // socket errors, T6/T7/T8 timeouts, Separate, and Select rejection
+        // all surface as a single Retry state. We map them honestly to
+        // CommunicationError. Distinguishing SelectFailed from SelectTimeout
+        // requires SDK-level signal that is not available.
         public static StateChangeReason MapReason(ConnectionState secsState, ProtocolConnectionState currentState)
         {
             switch (secsState)

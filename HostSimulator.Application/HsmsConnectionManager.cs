@@ -17,6 +17,7 @@ namespace HostSimulator.Application
         private Task _reconnectTask;
         private bool _disposed;
         private bool _running;
+        private bool _initialConnecting;
 
         public ProtocolConnectionState State { get; private set; } = ProtocolConnectionState.Disconnected;
 
@@ -42,6 +43,7 @@ namespace HostSimulator.Application
 
                 _profile = profile;
                 _running = true;
+                _initialConnecting = true;
                 _reconnectCts = new CancellationTokenSource();
             }
 
@@ -50,19 +52,18 @@ namespace HostSimulator.Application
             try
             {
                 await ConnectAdapterAsync(cancellationToken).ConfigureAwait(false);
+                lock (_lock) { _initialConnecting = false; }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                await CleanupAdapterAsync().ConfigureAwait(false);
-                lock (_lock) { _running = false; }
+                lock (_lock) { _running = false; _initialConnecting = false; }
                 SetState(ProtocolConnectionState.Disconnected, StateChangeReason.UserRequest);
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.Error($"Connection failed: {ex.Message}");
-                await CleanupAdapterAsync().ConfigureAwait(false);
-                lock (_lock) { _running = false; }
+                lock (_lock) { _running = false; _initialConnecting = false; }
                 SetState(ProtocolConnectionState.Disconnected, StateChangeReason.CommunicationError);
             }
         }
@@ -71,7 +72,6 @@ namespace HostSimulator.Application
         {
             CancellationTokenSource reconnectCts;
             Task reconnectTask;
-            IProtocolAdapter adapter;
 
             lock (_lock)
             {
@@ -83,7 +83,6 @@ namespace HostSimulator.Application
                 _reconnectCts = null;
                 reconnectTask = _reconnectTask;
                 _reconnectTask = null;
-                adapter = _adapter;
             }
 
             reconnectCts?.Cancel();
@@ -97,23 +96,7 @@ namespace HostSimulator.Application
 
             reconnectCts?.Dispose();
 
-            if (adapter != null)
-            {
-                try
-                {
-                    await adapter.DisconnectAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warn($"Error during disconnect: {ex.Message}");
-                }
-                finally
-                {
-                    adapter.StateChanged -= OnAdapterStateChanged;
-                    adapter.Dispose();
-                    lock (_lock) { _adapter = null; }
-                }
-            }
+            await CleanupAdapterAsync().ConfigureAwait(false);
 
             SetState(ProtocolConnectionState.Disconnected, StateChangeReason.UserRequest);
             _logger.Info("HSMS connection stopped.");
@@ -135,8 +118,7 @@ namespace HostSimulator.Application
             if (adapter == null || profile == null)
                 return Task.FromResult(false);
 
-            var parameters = ConnectionParameters.FromProfile(profile);
-            var timeout = TimeSpan.FromSeconds(parameters.LinkTestIntervalSeconds + profile.T6 + 2);
+            var timeout = TimeSpan.FromSeconds(profile.T6 * 2 + 2);
             return adapter.LinktestAsync(timeout, cancellationToken);
         }
 
@@ -178,7 +160,23 @@ namespace HostSimulator.Application
 
             lock (_lock) { _adapter = adapter; }
 
-            await adapter.ConnectAsync(parameters, timeout, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await adapter.ConnectAsync(parameters, timeout, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                lock (_lock)
+                {
+                    if (_adapter == adapter)
+                        _adapter = null;
+                }
+                adapter.StateChanged -= OnAdapterStateChanged;
+                try { await adapter.DisconnectAsync().ConfigureAwait(false); }
+                catch { }
+                adapter.Dispose();
+                throw;
+            }
         }
 
         private async Task CleanupAdapterAsync()
@@ -207,6 +205,7 @@ namespace HostSimulator.Application
             lock (_lock)
             {
                 shouldReconnect = _running
+                    && !_initialConnecting
                     && _profile != null
                     && _profile.AutoReconnect
                     && e.NewState == ProtocolConnectionState.Disconnected
