@@ -13,4 +13,7 @@
     <ProjectReference Include="..\HostSimulator.Application\HostSimulator.Application.csproj" />
     <ProjectReference Include="..\HostSimulator.Domain\HostSimulator.Domain.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
 </Project>
