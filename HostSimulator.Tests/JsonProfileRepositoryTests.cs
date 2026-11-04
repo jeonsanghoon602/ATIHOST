@@ -162,5 +162,44 @@ namespace HostSimulator.Tests
             Assert.False(File.Exists(_filePath + ".tmp"));
             Assert.True(File.Exists(_filePath));
         }
+
+        [Fact]
+        public void Atomic_save_preserves_existing_file_on_replace()
+        {
+            var repo = new JsonProfileRepository(_filePath);
+            repo.Save(CreateProfile("EQ01", "192.168.1.100"));
+            repo.Save(CreateProfile("EQ01", "10.0.0.1"));
+
+            var loaded = repo.LoadAll();
+            Assert.Single(loaded);
+            Assert.Equal("10.0.0.1", loaded[0].IpAddress);
+            Assert.False(File.Exists(_filePath + ".tmp"));
+        }
+
+        [Fact]
+        public void Duplicate_profile_names_in_json_are_rejected()
+        {
+            File.WriteAllText(_filePath, @"[
+                {""profileName"":""EQ01"",""ipAddress"":""192.168.1.100"",""port"":5000,""isActive"":true,""deviceId"":0},
+                {""profileName"":""eq01"",""ipAddress"":""10.0.0.1"",""port"":5001,""isActive"":false,""deviceId"":1}
+            ]");
+            var repo = new JsonProfileRepository(_filePath);
+
+            var ex = Assert.Throws<ProfileValidationException>(() => repo.LoadAll());
+            Assert.Contains("Duplicate profile name", ex.Message);
+        }
+
+        [Fact]
+        public void SaveAll_rejects_duplicate_names()
+        {
+            var repo = new JsonProfileRepository(_filePath);
+            var profiles = new[]
+            {
+                CreateProfile("EQ01", "192.168.1.100"),
+                CreateProfile("eq01", "10.0.0.1")
+            };
+
+            Assert.Throws<ProfileValidationException>(() => repo.SaveAll(profiles));
+        }
     }
 }

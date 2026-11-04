@@ -39,7 +39,9 @@ namespace HostSimulator.Infrastructure.Profile
             if (dtos == null)
                 return Array.Empty<EquipmentProfile>();
 
-            return dtos.Select(ToProfile).ToList().AsReadOnly();
+            var profiles = dtos.Select(ToProfile).ToList();
+            DetectDuplicateNames(profiles);
+            return profiles.AsReadOnly();
         }
 
         public EquipmentProfile LoadByName(string profileName)
@@ -70,7 +72,9 @@ namespace HostSimulator.Infrastructure.Profile
 
         public void SaveAll(IEnumerable<EquipmentProfile> profiles)
         {
-            var dtos = profiles.Select(ToDto).ToList();
+            var profileList = profiles.ToList();
+            DetectDuplicateNames(profileList);
+            var dtos = profileList.Select(ToDto).ToList();
             var json = JsonConvert.SerializeObject(dtos, Formatting.Indented);
 
             var directory = Path.GetDirectoryName(_filePath);
@@ -80,8 +84,9 @@ namespace HostSimulator.Infrastructure.Profile
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(tempPath, json, Encoding.UTF8);
             if (File.Exists(_filePath))
-                File.Delete(_filePath);
-            File.Move(tempPath, _filePath);
+                File.Replace(tempPath, _filePath, null);
+            else
+                File.Move(tempPath, _filePath);
         }
 
         private static EquipmentProfile ToProfile(ProfileDto dto)
@@ -99,6 +104,19 @@ namespace HostSimulator.Infrastructure.Profile
                 dto.T8,
                 dto.AutoReconnect,
                 dto.ReconnectIntervalSeconds);
+        }
+
+        private static void DetectDuplicateNames(List<EquipmentProfile> profiles)
+        {
+            var duplicates = profiles
+                .GroupBy(p => p.ProfileName, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+
+            if (duplicates.Count > 0)
+                throw new ProfileValidationException(
+                    duplicates.Select(n => $"Duplicate profile name: {n}").ToArray());
         }
 
         private static ProfileDto ToDto(EquipmentProfile profile)
