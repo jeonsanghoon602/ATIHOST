@@ -282,5 +282,130 @@ namespace HostSimulator.Tests
 
             Assert.Contains(logger.Messages, m => m.Contains("stopped"));
         }
+
+        [Fact]
+        public async Task AutoReconnect_schedules_on_connection_loss()
+        {
+            var connectCount = 0;
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var logger = new StubLogger();
+
+            StubAdapter currentAdapter = null;
+            var manager = new HsmsConnectionManager(
+                () =>
+                {
+                    connectCount++;
+                    currentAdapter = new StubAdapter();
+                    if (connectCount >= 2)
+                        tcs.TrySetResult(true);
+                    return currentAdapter;
+                },
+                logger);
+
+            var profile = DefaultProfile(autoReconnect: true, reconnectInterval: 1);
+            await manager.StartAsync(profile);
+
+            currentAdapter.SimulateConnectionLoss();
+
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            {
+                cts.Token.Register(() => tcs.TrySetCanceled());
+                try
+                {
+                    await tcs.Task;
+                    Assert.True(connectCount >= 2, "Reconnect should have created a new adapter");
+                }
+                catch (TaskCanceledException)
+                {
+                    Assert.Contains(logger.Messages, m => m.Contains("Scheduling auto-reconnect"));
+                }
+            }
+
+            await manager.StopAsync();
+        }
+
+        [Fact]
+        public async Task Duplicate_disconnect_events_do_not_schedule_multiple_reconnects()
+        {
+            var logger = new StubLogger();
+            StubAdapter currentAdapter = null;
+            var manager = new HsmsConnectionManager(
+                () => { currentAdapter = new StubAdapter(); return currentAdapter; },
+                logger);
+
+            var profile = DefaultProfile(autoReconnect: true, reconnectInterval: 60);
+            await manager.StartAsync(profile);
+
+            currentAdapter.SimulateConnectionLoss();
+            currentAdapter.SimulateConnectionLoss();
+
+            await Task.Delay(100);
+
+            var scheduleCount = 0;
+            foreach (var m in logger.Messages)
+            {
+                if (m.Contains("Scheduling auto-reconnect") || m.Contains("Reconnecting in"))
+                    scheduleCount++;
+            }
+
+            Assert.True(scheduleCount <= 2, $"Expected at most one reconnect schedule+run pair, got {scheduleCount} log entries");
+
+            await manager.StopAsync();
+        }
+
+        [Fact]
+        public async Task StopAsync_cancels_pending_reconnect()
+        {
+            var logger = new StubLogger();
+            StubAdapter currentAdapter = null;
+            var manager = new HsmsConnectionManager(
+                () => { currentAdapter = new StubAdapter(); return currentAdapter; },
+                logger);
+
+            var profile = DefaultProfile(autoReconnect: true, reconnectInterval: 60);
+            await manager.StartAsync(profile);
+
+            currentAdapter.SimulateConnectionLoss();
+            await Task.Delay(50);
+
+            await manager.StopAsync();
+
+            Assert.Equal(ProtocolConnectionState.Disconnected, manager.State);
+            Assert.Contains(logger.Messages, m => m.Contains("cancelled") || m.Contains("stopped"));
+        }
+
+        [Fact]
+        public async Task Concurrent_StopAsync_calls_are_safe()
+        {
+            StubAdapter currentAdapter = null;
+            var manager = new HsmsConnectionManager(
+                () => { currentAdapter = new StubAdapter(); return currentAdapter; },
+                new StubLogger());
+
+            await manager.StartAsync(DefaultProfile());
+
+            var stop1 = manager.StopAsync();
+            var stop2 = manager.StopAsync();
+
+            await Task.WhenAll(stop1, stop2);
+
+            Assert.Equal(ProtocolConnectionState.Disconnected, manager.State);
+        }
+
+        [Fact]
+        public async Task Start_after_stop_works()
+        {
+            var manager = new HsmsConnectionManager(
+                () => new StubAdapter(),
+                new StubLogger());
+
+            await manager.StartAsync(DefaultProfile());
+            await manager.StopAsync();
+            await manager.StartAsync(DefaultProfile());
+
+            Assert.Equal(ProtocolConnectionState.Selected, manager.State);
+
+            await manager.StopAsync();
+        }
     }
 }

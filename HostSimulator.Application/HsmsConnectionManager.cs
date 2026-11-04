@@ -14,6 +14,7 @@ namespace HostSimulator.Application
         private IProtocolAdapter _adapter;
         private EquipmentProfile _profile;
         private CancellationTokenSource _reconnectCts;
+        private Task _reconnectTask;
         private bool _disposed;
         private bool _running;
 
@@ -46,12 +47,23 @@ namespace HostSimulator.Application
 
             _logger.Info($"Starting HSMS connection: {profile.ToSafeLogString()}");
 
-            await ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await ConnectAdapterAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Connection failed: {ex.Message}");
+                await CleanupAdapterAsync().ConfigureAwait(false);
+                lock (_lock) { _running = false; }
+                SetState(ProtocolConnectionState.Disconnected, StateChangeReason.CommunicationError);
+            }
         }
 
         public async Task StopAsync()
         {
             CancellationTokenSource reconnectCts;
+            Task reconnectTask;
             IProtocolAdapter adapter;
 
             lock (_lock)
@@ -62,10 +74,20 @@ namespace HostSimulator.Application
                 _running = false;
                 reconnectCts = _reconnectCts;
                 _reconnectCts = null;
+                reconnectTask = _reconnectTask;
+                _reconnectTask = null;
                 adapter = _adapter;
             }
 
             reconnectCts?.Cancel();
+
+            if (reconnectTask != null)
+            {
+                try { await reconnectTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { _logger.Warn($"Reconnect task error on stop: {ex.Message}"); }
+            }
+
             reconnectCts?.Dispose();
 
             if (adapter != null)
@@ -112,15 +134,18 @@ namespace HostSimulator.Application
 
         public void Dispose()
         {
+            CancellationTokenSource reconnectCts;
             lock (_lock)
             {
                 if (_disposed) return;
                 _disposed = true;
                 _running = false;
+                reconnectCts = _reconnectCts;
+                _reconnectCts = null;
             }
 
-            _reconnectCts?.Cancel();
-            _reconnectCts?.Dispose();
+            reconnectCts?.Cancel();
+            reconnectCts?.Dispose();
 
             if (_adapter != null)
             {
@@ -130,25 +155,6 @@ namespace HostSimulator.Application
             }
 
             SetState(ProtocolConnectionState.Disconnected, StateChangeReason.Disposed);
-        }
-
-        private async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
-        {
-            CancellationTokenSource reconnectCts;
-
-            lock (_lock)
-            {
-                reconnectCts = _reconnectCts;
-            }
-
-            if (reconnectCts == null || reconnectCts.IsCancellationRequested)
-                return;
-
-            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, reconnectCts.Token))
-            {
-                await ConnectAdapterAsync(linked.Token).ConfigureAwait(false);
-            }
         }
 
         private async Task ConnectAdapterAsync(CancellationToken cancellationToken)
@@ -164,24 +170,24 @@ namespace HostSimulator.Application
 
             lock (_lock) { _adapter = adapter; }
 
-            try
+            await adapter.ConnectAsync(parameters, timeout, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task CleanupAdapterAsync()
+        {
+            IProtocolAdapter adapter;
+            lock (_lock)
             {
-                await adapter.ConnectAsync(parameters, timeout, cancellationToken).ConfigureAwait(false);
+                adapter = _adapter;
+                _adapter = null;
             }
-            catch (TimeoutException ex)
+
+            if (adapter != null)
             {
-                _logger.Error($"Connection timeout: {ex.Message}");
-                HandleConnectionLoss(StateChangeReason.T7Timeout);
-                return;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Connection failed: {ex.Message}");
-                HandleConnectionLoss(StateChangeReason.CommunicationError);
+                adapter.StateChanged -= OnAdapterStateChanged;
+                try { await adapter.DisconnectAsync().ConfigureAwait(false); }
+                catch { /* best-effort cleanup */ }
+                adapter.Dispose();
             }
         }
 
@@ -189,41 +195,20 @@ namespace HostSimulator.Application
         {
             SetState(e.NewState, e.Reason);
 
-            if (e.NewState == ProtocolConnectionState.Disconnected
-                || (e.NewState == ProtocolConnectionState.Connecting
-                    && e.Reason == StateChangeReason.ReconnectAttempt))
-            {
-                bool shouldReconnect;
-                lock (_lock)
-                {
-                    shouldReconnect = _running && _profile != null && _profile.AutoReconnect
-                        && e.NewState == ProtocolConnectionState.Disconnected
-                        && e.Reason != StateChangeReason.UserRequest
-                        && e.Reason != StateChangeReason.Disposed;
-                }
-
-                if (shouldReconnect)
-                {
-                    _logger.Info("Connection lost. Scheduling auto-reconnect...");
-                    ScheduleReconnect();
-                }
-            }
-        }
-
-        private void HandleConnectionLoss(StateChangeReason reason)
-        {
             bool shouldReconnect;
-
             lock (_lock)
             {
-                shouldReconnect = _running && _profile != null && _profile.AutoReconnect;
+                shouldReconnect = _running
+                    && _profile != null
+                    && _profile.AutoReconnect
+                    && e.NewState == ProtocolConnectionState.Disconnected
+                    && e.Reason != StateChangeReason.UserRequest
+                    && e.Reason != StateChangeReason.Disposed;
             }
-
-            SetState(ProtocolConnectionState.Disconnected, reason);
 
             if (shouldReconnect)
             {
-                _logger.Info($"Connection lost ({reason}). Scheduling auto-reconnect...");
+                _logger.Info($"Connection lost ({e.Reason}). Scheduling auto-reconnect...");
                 ScheduleReconnect();
             }
         }
@@ -237,40 +222,49 @@ namespace HostSimulator.Application
             {
                 if (!_running || _profile == null)
                     return;
+                if (_reconnectTask != null && !_reconnectTask.IsCompleted)
+                {
+                    _logger.Info("Reconnect already scheduled, skipping duplicate.");
+                    return;
+                }
+
                 intervalSeconds = _profile.ReconnectIntervalSeconds;
                 reconnectCts = _reconnectCts;
+                if (reconnectCts == null || reconnectCts.IsCancellationRequested)
+                    return;
+
+                _reconnectTask = RunReconnectAsync(intervalSeconds, reconnectCts.Token);
             }
+        }
 
-            if (reconnectCts == null || reconnectCts.IsCancellationRequested)
-                return;
-
-            Task.Run(async () =>
+        private async Task RunReconnectAsync(int intervalSeconds, CancellationToken cancellationToken)
+        {
+            try
             {
-                try
-                {
-                    _logger.Info($"Reconnecting in {intervalSeconds} seconds...");
-                    await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), reconnectCts.Token).ConfigureAwait(false);
+                _logger.Info($"Reconnecting in {intervalSeconds} seconds...");
+                await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), cancellationToken).ConfigureAwait(false);
 
-                    // Dispose old adapter
-                    IProtocolAdapter oldAdapter;
-                    lock (_lock) { oldAdapter = _adapter; _adapter = null; }
-                    if (oldAdapter != null)
-                    {
-                        oldAdapter.StateChanged -= OnAdapterStateChanged;
-                        oldAdapter.Dispose();
-                    }
-
-                    await ConnectAdapterAsync(reconnectCts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.Info("Auto-reconnect cancelled.");
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error($"Auto-reconnect failed: {ex.Message}");
-                }
-            });
+                await CleanupAdapterAsync().ConfigureAwait(false);
+                await ConnectAdapterAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.Info("Auto-reconnect cancelled.");
+            }
+            catch (TimeoutException ex)
+            {
+                _logger.Error($"Auto-reconnect timeout: {ex.Message}");
+                ScheduleReconnect();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Auto-reconnect failed: {ex.Message}");
+                ScheduleReconnect();
+            }
+            finally
+            {
+                lock (_lock) { _reconnectTask = null; }
+            }
         }
 
         private void SetState(ProtocolConnectionState newState, StateChangeReason reason)

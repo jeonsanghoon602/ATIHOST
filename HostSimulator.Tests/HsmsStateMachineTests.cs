@@ -107,13 +107,26 @@ namespace HostSimulator.Tests
         }
 
         [Fact]
-        public void Connected_to_Connecting_is_invalid()
+        public void Connected_to_Connecting_is_valid_for_SDK_Retry()
         {
             var sm = CreateMachine();
             sm.TryTransition(ProtocolConnectionState.Connecting, StateChangeReason.UserRequest);
             sm.TryTransition(ProtocolConnectionState.Connected, StateChangeReason.ConnectionEstablished);
-            var result = sm.TryTransition(ProtocolConnectionState.Connecting, StateChangeReason.ReconnectAttempt);
-            Assert.False(result);
+            var result = sm.TryTransition(ProtocolConnectionState.Connecting, StateChangeReason.SelectTimeout);
+            Assert.True(result);
+            Assert.Equal(ProtocolConnectionState.Connecting, sm.CurrentState);
+        }
+
+        [Fact]
+        public void Selected_to_Connecting_is_valid_for_SDK_Retry()
+        {
+            var sm = CreateMachine();
+            sm.TryTransition(ProtocolConnectionState.Connecting, StateChangeReason.UserRequest);
+            sm.TryTransition(ProtocolConnectionState.Connected, StateChangeReason.ConnectionEstablished);
+            sm.TryTransition(ProtocolConnectionState.Selected, StateChangeReason.SelectCompleted);
+            var result = sm.TryTransition(ProtocolConnectionState.Connecting, StateChangeReason.LinktestFailed);
+            Assert.True(result);
+            Assert.Equal(ProtocolConnectionState.Connecting, sm.CurrentState);
         }
 
         [Fact]
@@ -228,10 +241,10 @@ namespace HostSimulator.Tests
         [InlineData(ProtocolConnectionState.Connected, ProtocolConnectionState.Selected, true)]
         [InlineData(ProtocolConnectionState.Connected, ProtocolConnectionState.Disconnecting, true)]
         [InlineData(ProtocolConnectionState.Connected, ProtocolConnectionState.Disconnected, true)]
-        [InlineData(ProtocolConnectionState.Connected, ProtocolConnectionState.Connecting, false)]
+        [InlineData(ProtocolConnectionState.Connected, ProtocolConnectionState.Connecting, true)]
         [InlineData(ProtocolConnectionState.Selected, ProtocolConnectionState.Disconnecting, true)]
         [InlineData(ProtocolConnectionState.Selected, ProtocolConnectionState.Disconnected, true)]
-        [InlineData(ProtocolConnectionState.Selected, ProtocolConnectionState.Connecting, false)]
+        [InlineData(ProtocolConnectionState.Selected, ProtocolConnectionState.Connecting, true)]
         [InlineData(ProtocolConnectionState.Disconnecting, ProtocolConnectionState.Disconnected, true)]
         [InlineData(ProtocolConnectionState.Disconnecting, ProtocolConnectionState.Connecting, false)]
         public void IsValidTransition_covers_all_cases(ProtocolConnectionState from, ProtocolConnectionState to, bool expected)

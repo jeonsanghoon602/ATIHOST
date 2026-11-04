@@ -62,11 +62,13 @@ namespace HostSimulator.Domain
                 case ProtocolConnectionState.Connected:
                     return to == ProtocolConnectionState.Selected
                         || to == ProtocolConnectionState.Disconnecting
-                        || to == ProtocolConnectionState.Disconnected;
+                        || to == ProtocolConnectionState.Disconnected
+                        || to == ProtocolConnectionState.Connecting;
 
                 case ProtocolConnectionState.Selected:
                     return to == ProtocolConnectionState.Disconnecting
-                        || to == ProtocolConnectionState.Disconnected;
+                        || to == ProtocolConnectionState.Disconnected
+                        || to == ProtocolConnectionState.Connecting;
 
                 case ProtocolConnectionState.Disconnecting:
                     return to == ProtocolConnectionState.Disconnected;

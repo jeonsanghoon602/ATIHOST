@@ -34,25 +34,43 @@ namespace HostSimulator.Tests
         [Fact]
         public void Connecting_reason_is_UserRequest()
         {
-            Assert.Equal(StateChangeReason.UserRequest, Secs4NetAdapter.MapReason(ConnectionState.Connecting));
+            Assert.Equal(StateChangeReason.UserRequest,
+                Secs4NetAdapter.MapReason(ConnectionState.Connecting, ProtocolConnectionState.Disconnected));
         }
 
         [Fact]
         public void Connected_reason_is_ConnectionEstablished()
         {
-            Assert.Equal(StateChangeReason.ConnectionEstablished, Secs4NetAdapter.MapReason(ConnectionState.Connected));
+            Assert.Equal(StateChangeReason.ConnectionEstablished,
+                Secs4NetAdapter.MapReason(ConnectionState.Connected, ProtocolConnectionState.Connecting));
         }
 
         [Fact]
         public void Selected_reason_is_SelectCompleted()
         {
-            Assert.Equal(StateChangeReason.SelectCompleted, Secs4NetAdapter.MapReason(ConnectionState.Selected));
+            Assert.Equal(StateChangeReason.SelectCompleted,
+                Secs4NetAdapter.MapReason(ConnectionState.Selected, ProtocolConnectionState.Connected));
         }
 
         [Fact]
-        public void Retry_reason_is_ReconnectAttempt()
+        public void Retry_from_Connected_is_SelectTimeout()
         {
-            Assert.Equal(StateChangeReason.ReconnectAttempt, Secs4NetAdapter.MapReason(ConnectionState.Retry));
+            Assert.Equal(StateChangeReason.SelectTimeout,
+                Secs4NetAdapter.MapReason(ConnectionState.Retry, ProtocolConnectionState.Connected));
+        }
+
+        [Fact]
+        public void Retry_from_Selected_is_LinktestFailed()
+        {
+            Assert.Equal(StateChangeReason.LinktestFailed,
+                Secs4NetAdapter.MapReason(ConnectionState.Retry, ProtocolConnectionState.Selected));
+        }
+
+        [Fact]
+        public void Retry_from_Connecting_is_ReconnectAttempt()
+        {
+            Assert.Equal(StateChangeReason.ReconnectAttempt,
+                Secs4NetAdapter.MapReason(ConnectionState.Retry, ProtocolConnectionState.Connecting));
         }
     }
 }

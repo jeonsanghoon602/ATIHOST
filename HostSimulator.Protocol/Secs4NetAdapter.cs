@@ -11,19 +11,26 @@ namespace HostSimulator.Protocol
     {
         private readonly ISecsGemLogger _secsLogger;
         private readonly Domain.ILogger _logger;
+        private readonly HsmsStateMachine _stateMachine;
         private HsmsConnection _connection;
         private CancellationTokenSource _lifetimeCts;
         private readonly object _lock = new object();
         private bool _disposed;
+        private ProtocolConnectionState _stateBeforeRetry = ProtocolConnectionState.Disconnected;
 
-        public ProtocolConnectionState State { get; private set; } = ProtocolConnectionState.Disconnected;
+        public ProtocolConnectionState State => _stateMachine.CurrentState;
 
-        public event EventHandler<StateChangedEventArgs> StateChanged;
+        public event EventHandler<StateChangedEventArgs> StateChanged
+        {
+            add { _stateMachine.StateChanged += value; }
+            remove { _stateMachine.StateChanged -= value; }
+        }
 
         public Secs4NetAdapter(Domain.ILogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _secsLogger = new Secs4NetLoggerBridge(logger);
+            _stateMachine = new HsmsStateMachine(logger);
         }
 
         public async Task ConnectAsync(
@@ -47,7 +54,7 @@ namespace HostSimulator.Protocol
                 if (_connection != null)
                     throw new InvalidOperationException("Already connected. Disconnect first.");
 
-                SetState(ProtocolConnectionState.Connecting, StateChangeReason.UserRequest);
+                _stateMachine.TryTransition(ProtocolConnectionState.Connecting, StateChangeReason.UserRequest);
 
                 var options = Options.Create(new SecsGemOptions
                 {
@@ -93,10 +100,25 @@ namespace HostSimulator.Protocol
                     }
                 }
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                throw new TimeoutException(
-                    $"Connection did not reach Selected state within {timeout.TotalSeconds}s.");
+                await CleanupConnectionAsync().ConfigureAwait(false);
+
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.SelectTimeout);
+                    throw new TimeoutException(
+                        $"Connection did not reach Selected state within {timeout.TotalSeconds}s.");
+                }
+
+                _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.UserRequest);
+                throw;
+            }
+            catch (Exception)
+            {
+                await CleanupConnectionAsync().ConfigureAwait(false);
+                _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.CommunicationError);
+                throw;
             }
             finally
             {
@@ -117,7 +139,7 @@ namespace HostSimulator.Protocol
                 _lifetimeCts = null;
             }
 
-            SetState(ProtocolConnectionState.Disconnecting, StateChangeReason.UserRequest);
+            _stateMachine.TryTransition(ProtocolConnectionState.Disconnecting, StateChangeReason.UserRequest);
 
             if (lifetimeCts != null)
             {
@@ -131,10 +153,10 @@ namespace HostSimulator.Protocol
                 await conn.DisposeAsync().ConfigureAwait(false);
             }
 
-            SetState(ProtocolConnectionState.Disconnected, StateChangeReason.UserRequest);
+            _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.UserRequest);
         }
 
-        public Task<bool> LinktestAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+        public async Task<bool> LinktestAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
         {
             HsmsConnection conn;
             lock (_lock)
@@ -147,23 +169,53 @@ namespace HostSimulator.Protocol
             if (conn == null || State != ProtocolConnectionState.Selected)
             {
                 _logger.Warn("Linktest requested but not in Selected state.");
-                return Task.FromResult(false);
+                return false;
             }
 
-            // Secs4Net 2.4.4 handles Linktest internally via LinkTestEnabled.
-            // Verify the connection is alive by confirming the SDK state is Selected.
-            var sdkSelected = conn.State == ConnectionState.Selected;
-            if (sdkSelected)
+            conn.LinkTestEnabled = true;
+
+            // Observe whether SDK state remains Selected after one LinkTest interval.
+            // If a Linktest fails, the SDK transitions to Retry (T6 timeout), which
+            // our OnConnectionChanged will detect and move out of Selected.
+            var stateBefore = conn.State;
+            if (stateBefore != ConnectionState.Selected)
             {
-                conn.LinkTestEnabled = true;
-                _logger.Info("Linktest: connection is Selected, periodic LinkTest is enabled.");
-            }
-            else
-            {
-                _logger.Warn($"Linktest: SDK state is {conn.State}, not Selected.");
+                _logger.Warn($"Linktest: SDK state is {stateBefore}, not Selected.");
+                return false;
             }
 
-            return Task.FromResult(sdkSelected);
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void onStateChange(object sender, ConnectionState state)
+            {
+                if (state != ConnectionState.Selected)
+                    tcs.TrySetResult(false);
+            }
+
+            conn.ConnectionChanged += onStateChange;
+            try
+            {
+                var observeTime = Math.Max(conn.LinkTestInterval + conn.T6 + 1000, 5000);
+                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                {
+                    cts.CancelAfter(Math.Min(observeTime, (int)timeout.TotalMilliseconds));
+                    using (cts.Token.Register(() => tcs.TrySetResult(true)))
+                    {
+                        var result = await tcs.Task.ConfigureAwait(false);
+                        _logger.Info($"Linktest result: {result} (state={conn.State})");
+                        return result;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Linktest observation failed: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                conn.ConnectionChanged -= onStateChange;
+            }
         }
 
         public void Dispose()
@@ -193,15 +245,45 @@ namespace HostSimulator.Protocol
                 conn.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
 
-            SetState(ProtocolConnectionState.Disconnected, StateChangeReason.Disposed);
+            _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.Disposed);
+        }
+
+        private async Task CleanupConnectionAsync()
+        {
+            HsmsConnection conn;
+            CancellationTokenSource lifetimeCts;
+
+            lock (_lock)
+            {
+                conn = _connection;
+                _connection = null;
+                lifetimeCts = _lifetimeCts;
+                _lifetimeCts = null;
+            }
+
+            if (lifetimeCts != null)
+            {
+                lifetimeCts.Cancel();
+                lifetimeCts.Dispose();
+            }
+
+            if (conn != null)
+            {
+                conn.ConnectionChanged -= OnConnectionChanged;
+                await conn.DisposeAsync().ConfigureAwait(false);
+            }
         }
 
         private void OnConnectionChanged(object sender, ConnectionState state)
         {
             var mapped = MapState(state);
-            var reason = MapReason(state);
+            var reason = MapReason(state, _stateMachine.CurrentState);
             _logger.Info($"ConnectionChanged: {state} -> {mapped} ({reason})");
-            SetState(mapped, reason);
+
+            if (state == ConnectionState.Retry)
+                _stateBeforeRetry = _stateMachine.CurrentState;
+
+            _stateMachine.TryTransition(mapped, reason);
 
             if (state == ConnectionState.Selected)
             {
@@ -228,7 +310,7 @@ namespace HostSimulator.Protocol
             }
         }
 
-        public static StateChangeReason MapReason(ConnectionState secsState)
+        public static StateChangeReason MapReason(ConnectionState secsState, ProtocolConnectionState currentState)
         {
             switch (secsState)
             {
@@ -239,20 +321,14 @@ namespace HostSimulator.Protocol
                 case ConnectionState.Selected:
                     return StateChangeReason.SelectCompleted;
                 case ConnectionState.Retry:
+                    if (currentState == ProtocolConnectionState.Connected)
+                        return StateChangeReason.SelectTimeout;
+                    if (currentState == ProtocolConnectionState.Selected)
+                        return StateChangeReason.LinktestFailed;
                     return StateChangeReason.ReconnectAttempt;
                 default:
                     return StateChangeReason.CommunicationError;
             }
-        }
-
-        private void SetState(ProtocolConnectionState newState, StateChangeReason reason)
-        {
-            var previous = State;
-            if (previous == newState)
-                return;
-            State = newState;
-            _logger.Info($"State: {previous} -> {newState} ({reason})");
-            StateChanged?.Invoke(this, new StateChangedEventArgs(previous, newState, reason));
         }
     }
 }
