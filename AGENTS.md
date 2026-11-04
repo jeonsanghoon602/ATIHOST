@@ -32,13 +32,13 @@
 - Follow the branch prefix required by the active tool; Codex branches default to `codex/`.
 - Do not merge until the Issue acceptance criteria, review, and required simulator tests pass.
 
-### Codex-Claude A2A workflow
+### Codex-Claude handoff workflow
 
-- Claude writes and fixes application code, tests, and implementation documentation. Codex coordinates requirements and must not substitute its own implementation when Claude is unavailable.
-- After each Claude implementation or fix, Codex independently reviews the diff and runs the required Debug/Release builds and relevant tests.
-- Codex automatically sends actionable review findings back to Claude. Repeat the Claude fix and Codex review cycle until no required findings remain.
-- After Codex verification passes for an authorized Issue, Claude creates the commit, pushes the branch, and creates or updates the Pull Request.
-- Codex verifies the resulting commit and Pull Request. Neither agent merges without explicit human approval.
+- The user manually relays work requests and review findings between Codex and Claude sessions; agents do not use automatic A2A handoff.
+- Claude normally writes and fixes application code, tests, and implementation documentation. Codex independently reviews the diff and runs the required Debug/Release builds and relevant tests.
+- Repeat the manual Claude fix and Codex review cycle until no required findings remain.
+- The user designates who creates the commit, pushes the branch, and creates or updates the Pull Request for each Issue.
+- The agent assigned to the Pull Request reports its commit and PR for verification. No agent merges without explicit human approval.
 
 ## Completion report
 

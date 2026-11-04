@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>HostSimulator.Poc</RootNamespace>
+    <AssemblyName>HostSimulator.Poc</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HostSimulator.Application\HostSimulator.Application.csproj" />
+    <ProjectReference Include="..\HostSimulator.Domain\HostSimulator.Domain.csproj" />
+    <ProjectReference Include="..\HostSimulator.Infrastructure\HostSimulator.Infrastructure.csproj" />
+    <ProjectReference Include="..\HostSimulator.Protocol\HostSimulator.Protocol.csproj" />
+  </ItemGroup>
+</Project>

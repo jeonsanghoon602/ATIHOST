@@ -31,14 +31,14 @@
 | ID | 항목 | 현재 상태 | 확인 담당자 | 예상 확인 시점 | 영향 범위 |
 |----|------|-----------|------------|----------------|-----------|
 | OI-011 | 대상 PC Windows 버전 | 미확정 | 배포 담당자 | 배포 계획 수립 시 | .NET Framework 호환성 |
-| OI-012 | x86/x64 Platform Target | 미확정 | 통신 SDK/배포 담당자 | HOST-003 SDK PoC 시 | 빌드 설정, 배포 패키지 |
-| OI-013 | Equipment Simulator 선정 | 미선정 | 개발팀 | HOST-003 시작 전 | SDK PoC, 자동 시험 환경 |
+| OI-012 | x86/x64 Platform Target | **확정: x64** | 통신 SDK/배포 담당자 | HOST-003 SDK PoC에서 확정 | 빌드 설정, 배포 패키지 |
+| OI-013 | Equipment Simulator 선정 | **확정: Root_ROE2.exe (HOST-003 최종 로컬 시험용)** | 개발팀 | HOST-003 SDK PoC에서 확정 | SDK PoC, 자동 시험 환경 |
 
 ### 2.4 개발 관련
 
 | ID | 항목 | 현재 상태 | 확인 담당자 | 예상 확인 시점 | 영향 범위 |
 |----|------|-----------|------------|----------------|-----------|
-| OI-014 | Secs4Net 2.4.4 vs 상용 SDK 결정 | Secs4Net 2.4.4 기본 | 개발팀 / PM | HOST-003 SDK PoC 시 | Protocol 계층 전체 |
+| OI-014 | Secs4Net 2.4.4 vs 상용 SDK 결정 | **확정: Secs4Net 2.4.4** | 개발팀 / PM | HOST-003 SDK PoC에서 확정 | Protocol 계층 전체 |
 | OI-015 | Scenario 파일 형식 (YAML/JSON) | 미확정 | 개발팀 | HOST-009 시작 전 | Scenario Runner |
 
 ## 3. 해결 프로세스
@@ -52,4 +52,6 @@
 
 | 날짜 | ID | 확정 내용 | 확인자 |
 |------|------|-----------|--------|
-| — | — | (아직 확정된 항목 없음) | — |
+| 2026-11-04 | OI-012 | x64 Platform Target 확정 (HOST-003 SDK PoC) | 개발팀 |
+| 2026-11-04 | OI-013 | XGem300Pro로 예비 시험 후 최종 로컬 시험용 Equipment Simulator를 Root_ROE2.exe로 변경. Host=Active, IP=127.0.0.1, Port=6000, Device ID=1 | 사용자 / 개발팀 |
+| 2026-11-04 | OI-014 | Secs4Net 2.4.4 선정 확정 (HOST-003 SDK PoC, docs/secs4net-sdk-evaluation.md 참조) | 개발팀 |

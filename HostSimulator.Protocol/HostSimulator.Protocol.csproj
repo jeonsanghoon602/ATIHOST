@@ -7,7 +7,7 @@
     <AssemblyName>HostSimulator.Protocol</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="IProtocolAdapter.cs" />
+    <PackageReference Include="Secs4Net" Version="2.4.4" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\HostSimulator.Domain\HostSimulator.Domain.csproj" />
