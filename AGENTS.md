@@ -36,6 +36,7 @@
 
 - The user manually relays work requests and review findings between Codex and Claude sessions; agents do not use automatic A2A handoff.
 - Claude normally writes and fixes application code, tests, and implementation documentation. Codex independently reviews the diff and runs the required Debug/Release builds and relevant tests.
+- Post PR review findings and the final verdict directly on the GitHub PR. Do not use session-only inline review comments or create duplicate review Markdown files unless the user explicitly requests them.
 - Repeat the manual Claude fix and Codex review cycle until no required findings remain.
 - The user designates who creates the commit, pushes the branch, and creates or updates the Pull Request for each Issue.
 - The agent assigned to the Pull Request reports its commit and PR for verification. No agent merges without explicit human approval.
