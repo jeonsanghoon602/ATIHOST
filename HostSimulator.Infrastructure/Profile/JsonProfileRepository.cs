@@ -90,7 +90,7 @@ namespace HostSimulator.Infrastructure.Profile
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(tempPath, json, Encoding.UTF8);
             if (File.Exists(_filePath))
-                ReplaceWithRetry(tempPath, _filePath, maxRetries: 3, delayMs: 50);
+                ReplaceWithRetry(tempPath, _filePath, maxRetries: 3, delayMs: 100);
             else
                 File.Move(tempPath, _filePath);
         }
@@ -118,16 +118,16 @@ namespace HostSimulator.Infrastructure.Profile
             {
                 try
                 {
-                    File.Replace(sourcePath, destinationPath, null);
+                    File.Replace(sourcePath, destinationPath, null, ignoreMetadataErrors: true);
                     return;
                 }
                 catch (IOException) when (attempt < maxRetries)
                 {
-                    System.Threading.Thread.Sleep(delayMs);
+                    System.Threading.Thread.Sleep(delayMs * (attempt + 1));
                 }
                 catch (UnauthorizedAccessException) when (attempt < maxRetries)
                 {
-                    System.Threading.Thread.Sleep(delayMs);
+                    System.Threading.Thread.Sleep(delayMs * (attempt + 1));
                 }
             }
         }
