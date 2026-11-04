@@ -80,5 +80,56 @@ namespace HostSimulator.Tests
             var p = new ConnectionParameters("127.0.0.1", 5000, true, deviceId);
             Assert.Equal(deviceId, p.DeviceId);
         }
+
+        [Fact]
+        public void DefaultConstructor_sets_default_timers()
+        {
+            var p = new ConnectionParameters("127.0.0.1", 5000, true, 0);
+            Assert.Equal(45, p.T3Seconds);
+            Assert.Equal(10, p.T5Seconds);
+            Assert.Equal(5, p.T6Seconds);
+            Assert.Equal(10, p.T7Seconds);
+            Assert.Equal(5, p.T8Seconds);
+            Assert.Equal(60, p.LinkTestIntervalSeconds);
+        }
+
+        [Fact]
+        public void FullConstructor_sets_custom_timers()
+        {
+            var p = new ConnectionParameters("127.0.0.1", 5000, true, 0, 30, 15, 10, 20, 8, 120);
+            Assert.Equal(30, p.T3Seconds);
+            Assert.Equal(15, p.T5Seconds);
+            Assert.Equal(10, p.T6Seconds);
+            Assert.Equal(20, p.T7Seconds);
+            Assert.Equal(8, p.T8Seconds);
+            Assert.Equal(120, p.LinkTestIntervalSeconds);
+        }
+
+        [Fact]
+        public void FromProfile_creates_matching_parameters()
+        {
+            var profile = new EquipmentProfile(
+                "TestEQ", "192.168.1.100", 6000, false, 1,
+                45, 10, 5, 10, 5, true, 10);
+
+            var p = ConnectionParameters.FromProfile(profile);
+
+            Assert.Equal("192.168.1.100", p.IpAddress.ToString());
+            Assert.Equal(6000, p.Port);
+            Assert.False(p.IsActive);
+            Assert.Equal(1, p.DeviceId);
+            Assert.Equal(45, p.T3Seconds);
+            Assert.Equal(10, p.T5Seconds);
+            Assert.Equal(5, p.T6Seconds);
+            Assert.Equal(10, p.T7Seconds);
+            Assert.Equal(5, p.T8Seconds);
+        }
+
+        [Fact]
+        public void FromProfile_null_throws()
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                ConnectionParameters.FromProfile(null));
+        }
     }
 }
