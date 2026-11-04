@@ -34,10 +34,16 @@ namespace HostSimulator.Tests
             public bool FailConnect { get; set; }
             public bool TimeoutConnect { get; set; }
             public bool LinktestResult { get; set; } = true;
+            public bool DelayCancelConnect { get; set; }
 
-            public Task ConnectAsync(ConnectionParameters parameters, TimeSpan timeout, CancellationToken cancellationToken = default)
+            public async Task ConnectAsync(ConnectionParameters parameters, TimeSpan timeout, CancellationToken cancellationToken = default)
             {
                 ConnectCount++;
+                if (DelayCancelConnect)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+                }
                 if (TimeoutConnect)
                     throw new TimeoutException("Simulated timeout");
                 if (FailConnect)
@@ -48,7 +54,7 @@ namespace HostSimulator.Tests
                 StateChanged?.Invoke(this, new StateChangedEventArgs(prev, ProtocolConnectionState.Connecting, StateChangeReason.UserRequest));
                 StateChanged?.Invoke(this, new StateChangedEventArgs(ProtocolConnectionState.Connecting, ProtocolConnectionState.Connected, StateChangeReason.ConnectionEstablished));
                 StateChanged?.Invoke(this, new StateChangedEventArgs(ProtocolConnectionState.Connected, ProtocolConnectionState.Selected, StateChangeReason.SelectCompleted));
-                return Task.CompletedTask;
+                return;
             }
 
             public Task DisconnectAsync()
@@ -286,7 +292,7 @@ namespace HostSimulator.Tests
         [Fact]
         public async Task AutoReconnect_schedules_on_connection_loss()
         {
-            var connectCount = 0;
+            var adapterCount = 0;
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var logger = new StubLogger();
 
@@ -294,32 +300,27 @@ namespace HostSimulator.Tests
             var manager = new HsmsConnectionManager(
                 () =>
                 {
-                    connectCount++;
+                    adapterCount++;
                     currentAdapter = new StubAdapter();
-                    if (connectCount >= 2)
+                    if (adapterCount >= 2)
                         tcs.TrySetResult(true);
                     return currentAdapter;
                 },
                 logger);
 
-            var profile = DefaultProfile(autoReconnect: true, reconnectInterval: 1);
+            var profile = DefaultProfile(autoReconnect: true, reconnectInterval: 10);
             await manager.StartAsync(profile);
 
+            Assert.Equal(1, adapterCount);
             currentAdapter.SimulateConnectionLoss();
 
-            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
             {
                 cts.Token.Register(() => tcs.TrySetCanceled());
-                try
-                {
-                    await tcs.Task;
-                    Assert.True(connectCount >= 2, "Reconnect should have created a new adapter");
-                }
-                catch (TaskCanceledException)
-                {
-                    Assert.Contains(logger.Messages, m => m.Contains("Scheduling auto-reconnect"));
-                }
+                await tcs.Task;
             }
+
+            Assert.True(adapterCount >= 2, $"Expected reconnect to create a new adapter, but count was {adapterCount}");
 
             await manager.StopAsync();
         }
@@ -327,28 +328,30 @@ namespace HostSimulator.Tests
         [Fact]
         public async Task Duplicate_disconnect_events_do_not_schedule_multiple_reconnects()
         {
+            var adapterCount = 0;
             var logger = new StubLogger();
             StubAdapter currentAdapter = null;
             var manager = new HsmsConnectionManager(
-                () => { currentAdapter = new StubAdapter(); return currentAdapter; },
+                () => { adapterCount++; currentAdapter = new StubAdapter(); return currentAdapter; },
                 logger);
 
             var profile = DefaultProfile(autoReconnect: true, reconnectInterval: 60);
             await manager.StartAsync(profile);
+            Assert.Equal(1, adapterCount);
 
             currentAdapter.SimulateConnectionLoss();
             currentAdapter.SimulateConnectionLoss();
 
-            await Task.Delay(100);
+            await Task.Delay(200);
 
-            var scheduleCount = 0;
+            var skipCount = 0;
             foreach (var m in logger.Messages)
             {
-                if (m.Contains("Scheduling auto-reconnect") || m.Contains("Reconnecting in"))
-                    scheduleCount++;
+                if (m.Contains("already scheduled"))
+                    skipCount++;
             }
 
-            Assert.True(scheduleCount <= 2, $"Expected at most one reconnect schedule+run pair, got {scheduleCount} log entries");
+            Assert.True(skipCount >= 1, "Second disconnect should have been skipped as duplicate");
 
             await manager.StopAsync();
         }
@@ -406,6 +409,24 @@ namespace HostSimulator.Tests
             Assert.Equal(ProtocolConnectionState.Selected, manager.State);
 
             await manager.StopAsync();
+        }
+
+        [Fact]
+        public async Task StartAsync_cancellation_propagates()
+        {
+            using (var cts = new CancellationTokenSource())
+            {
+                cts.Cancel();
+
+                var manager = new HsmsConnectionManager(
+                    () => new StubAdapter { DelayCancelConnect = true },
+                    new StubLogger());
+
+                await Assert.ThrowsAsync<OperationCanceledException>(() =>
+                    manager.StartAsync(DefaultProfile(), cts.Token));
+
+                Assert.Equal(ProtocolConnectionState.Disconnected, manager.State);
+            }
         }
     }
 }

@@ -16,7 +16,6 @@ namespace HostSimulator.Protocol
         private CancellationTokenSource _lifetimeCts;
         private readonly object _lock = new object();
         private bool _disposed;
-        private ProtocolConnectionState _stateBeforeRetry = ProtocolConnectionState.Disconnected;
 
         public ProtocolConnectionState State => _stateMachine.CurrentState;
 
@@ -106,7 +105,7 @@ namespace HostSimulator.Protocol
 
                 if (!cancellationToken.IsCancellationRequested)
                 {
-                    _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.SelectTimeout);
+                    _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.T7Timeout);
                     throw new TimeoutException(
                         $"Connection did not reach Selected state within {timeout.TotalSeconds}s.");
                 }
@@ -172,11 +171,6 @@ namespace HostSimulator.Protocol
                 return false;
             }
 
-            conn.LinkTestEnabled = true;
-
-            // Observe whether SDK state remains Selected after one LinkTest interval.
-            // If a Linktest fails, the SDK transitions to Retry (T6 timeout), which
-            // our OnConnectionChanged will detect and move out of Selected.
             var stateBefore = conn.State;
             if (stateBefore != ConnectionState.Selected)
             {
@@ -195,10 +189,14 @@ namespace HostSimulator.Protocol
             conn.ConnectionChanged += onStateChange;
             try
             {
-                var observeTime = Math.Max(conn.LinkTestInterval + conn.T6 + 1000, 5000);
-                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                conn.LinkTestEnabled = false;
+                conn.LinkTestEnabled = true;
+
+                using (var cts = new CancellationTokenSource())
                 {
-                    cts.CancelAfter(Math.Min(observeTime, (int)timeout.TotalMilliseconds));
+                    cts.CancelAfter(timeout);
+
+                    using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)))
                     using (cts.Token.Register(() => tcs.TrySetResult(true)))
                     {
                         var result = await tcs.Task.ConfigureAwait(false);
@@ -206,11 +204,6 @@ namespace HostSimulator.Protocol
                         return result;
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Linktest observation failed: {ex.Message}");
-                return false;
             }
             finally
             {
@@ -276,13 +269,20 @@ namespace HostSimulator.Protocol
 
         private void OnConnectionChanged(object sender, ConnectionState state)
         {
-            var mapped = MapState(state);
             var reason = MapReason(state, _stateMachine.CurrentState);
-            _logger.Info($"ConnectionChanged: {state} -> {mapped} ({reason})");
+            _logger.Info($"ConnectionChanged: {state} ({reason})");
 
             if (state == ConnectionState.Retry)
-                _stateBeforeRetry = _stateMachine.CurrentState;
+            {
+                lock (_lock)
+                {
+                    _lifetimeCts?.Cancel();
+                }
+                _stateMachine.ForceState(ProtocolConnectionState.Disconnected, reason);
+                return;
+            }
 
+            var mapped = MapState(state);
             _stateMachine.TryTransition(mapped, reason);
 
             if (state == ConnectionState.Selected)
@@ -321,11 +321,7 @@ namespace HostSimulator.Protocol
                 case ConnectionState.Selected:
                     return StateChangeReason.SelectCompleted;
                 case ConnectionState.Retry:
-                    if (currentState == ProtocolConnectionState.Connected)
-                        return StateChangeReason.SelectTimeout;
-                    if (currentState == ProtocolConnectionState.Selected)
-                        return StateChangeReason.LinktestFailed;
-                    return StateChangeReason.ReconnectAttempt;
+                    return StateChangeReason.CommunicationError;
                 default:
                     return StateChangeReason.CommunicationError;
             }

@@ -52,25 +52,14 @@ namespace HostSimulator.Tests
                 Secs4NetAdapter.MapReason(ConnectionState.Selected, ProtocolConnectionState.Connected));
         }
 
-        [Fact]
-        public void Retry_from_Connected_is_SelectTimeout()
+        [Theory]
+        [InlineData(ProtocolConnectionState.Connected)]
+        [InlineData(ProtocolConnectionState.Selected)]
+        [InlineData(ProtocolConnectionState.Connecting)]
+        public void Retry_reason_is_CommunicationError_regardless_of_current_state(ProtocolConnectionState currentState)
         {
-            Assert.Equal(StateChangeReason.SelectTimeout,
-                Secs4NetAdapter.MapReason(ConnectionState.Retry, ProtocolConnectionState.Connected));
-        }
-
-        [Fact]
-        public void Retry_from_Selected_is_LinktestFailed()
-        {
-            Assert.Equal(StateChangeReason.LinktestFailed,
-                Secs4NetAdapter.MapReason(ConnectionState.Retry, ProtocolConnectionState.Selected));
-        }
-
-        [Fact]
-        public void Retry_from_Connecting_is_ReconnectAttempt()
-        {
-            Assert.Equal(StateChangeReason.ReconnectAttempt,
-                Secs4NetAdapter.MapReason(ConnectionState.Retry, ProtocolConnectionState.Connecting));
+            Assert.Equal(StateChangeReason.CommunicationError,
+                Secs4NetAdapter.MapReason(ConnectionState.Retry, currentState));
         }
     }
 }

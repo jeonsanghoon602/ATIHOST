@@ -51,6 +51,13 @@ namespace HostSimulator.Application
             {
                 await ConnectAdapterAsync(cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await CleanupAdapterAsync().ConfigureAwait(false);
+                lock (_lock) { _running = false; }
+                SetState(ProtocolConnectionState.Disconnected, StateChangeReason.UserRequest);
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.Error($"Connection failed: {ex.Message}");
@@ -128,7 +135,8 @@ namespace HostSimulator.Application
             if (adapter == null || profile == null)
                 return Task.FromResult(false);
 
-            var timeout = TimeSpan.FromSeconds(profile.T6);
+            var parameters = ConnectionParameters.FromProfile(profile);
+            var timeout = TimeSpan.FromSeconds(parameters.LinkTestIntervalSeconds + profile.T6 + 2);
             return adapter.LinktestAsync(timeout, cancellationToken);
         }
 
@@ -239,6 +247,7 @@ namespace HostSimulator.Application
 
         private async Task RunReconnectAsync(int intervalSeconds, CancellationToken cancellationToken)
         {
+            bool shouldRetry = false;
             try
             {
                 _logger.Info($"Reconnecting in {intervalSeconds} seconds...");
@@ -251,19 +260,16 @@ namespace HostSimulator.Application
             {
                 _logger.Info("Auto-reconnect cancelled.");
             }
-            catch (TimeoutException ex)
-            {
-                _logger.Error($"Auto-reconnect timeout: {ex.Message}");
-                ScheduleReconnect();
-            }
             catch (Exception ex)
             {
                 _logger.Error($"Auto-reconnect failed: {ex.Message}");
-                ScheduleReconnect();
+                shouldRetry = true;
             }
             finally
             {
                 lock (_lock) { _reconnectTask = null; }
+                if (shouldRetry)
+                    ScheduleReconnect();
             }
         }
 
