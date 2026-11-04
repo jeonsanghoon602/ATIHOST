@@ -14,6 +14,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.App", "HostSi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.Tests", "HostSimulator.Tests\HostSimulator.Tests.csproj", "{C4455040-2EE6-4A03-818B-530499E6694B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostSimulator.Poc", "HostSimulator.Poc\HostSimulator.Poc.csproj", "{F5A302C6-8E17-4B5A-9C0D-6A7E8B1F2D34}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -47,5 +49,9 @@ Global
 		{C4455040-2EE6-4A03-818B-530499E6694B}.Debug|x64.Build.0 = Debug|x64
 		{C4455040-2EE6-4A03-818B-530499E6694B}.Release|x64.ActiveCfg = Release|x64
 		{C4455040-2EE6-4A03-818B-530499E6694B}.Release|x64.Build.0 = Release|x64
+		{F5A302C6-8E17-4B5A-9C0D-6A7E8B1F2D34}.Debug|x64.ActiveCfg = Debug|x64
+		{F5A302C6-8E17-4B5A-9C0D-6A7E8B1F2D34}.Debug|x64.Build.0 = Debug|x64
+		{F5A302C6-8E17-4B5A-9C0D-6A7E8B1F2D34}.Release|x64.ActiveCfg = Release|x64
+		{F5A302C6-8E17-4B5A-9C0D-6A7E8B1F2D34}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 EndGlobal

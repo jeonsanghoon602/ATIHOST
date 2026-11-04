@@ -19,7 +19,9 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\HostSimulator.Application\HostSimulator.Application.csproj" />
     <ProjectReference Include="..\HostSimulator.Domain\HostSimulator.Domain.csproj" />
     <ProjectReference Include="..\HostSimulator.Infrastructure\HostSimulator.Infrastructure.csproj" />
+    <ProjectReference Include="..\HostSimulator.Protocol\HostSimulator.Protocol.csproj" />
   </ItemGroup>
 </Project>
