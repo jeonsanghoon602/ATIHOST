@@ -31,13 +31,19 @@ namespace HostSimulator.Infrastructure.Profile
             {
                 dtos = JsonConvert.DeserializeObject<List<ProfileDto>>(json);
             }
-            catch (JsonSerializationException ex)
+            catch (JsonException ex)
             {
-                throw new ProfileValidationException(new[] { "Required JSON property missing: " + ex.Message });
+                throw new ProfileValidationException(new[] { "Invalid profile JSON: " + ex.Message });
             }
 
             if (dtos == null)
                 return Array.Empty<EquipmentProfile>();
+
+            for (int i = 0; i < dtos.Count; i++)
+            {
+                if (dtos[i] == null)
+                    throw new ProfileValidationException(new[] { $"Profile at index {i} is null." });
+            }
 
             var profiles = dtos.Select(ToProfile).ToList();
             DetectDuplicateNames(profiles);
@@ -84,7 +90,7 @@ namespace HostSimulator.Infrastructure.Profile
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(tempPath, json, Encoding.UTF8);
             if (File.Exists(_filePath))
-                File.Replace(tempPath, _filePath, null);
+                ReplaceWithRetry(tempPath, _filePath, maxRetries: 3, delayMs: 50);
             else
                 File.Move(tempPath, _filePath);
         }
@@ -104,6 +110,26 @@ namespace HostSimulator.Infrastructure.Profile
                 dto.T8,
                 dto.AutoReconnect,
                 dto.ReconnectIntervalSeconds);
+        }
+
+        private static void ReplaceWithRetry(string sourcePath, string destinationPath, int maxRetries, int delayMs)
+        {
+            for (int attempt = 0; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    File.Replace(sourcePath, destinationPath, null);
+                    return;
+                }
+                catch (IOException) when (attempt < maxRetries)
+                {
+                    System.Threading.Thread.Sleep(delayMs);
+                }
+                catch (UnauthorizedAccessException) when (attempt < maxRetries)
+                {
+                    System.Threading.Thread.Sleep(delayMs);
+                }
+            }
         }
 
         private static void DetectDuplicateNames(List<EquipmentProfile> profiles)

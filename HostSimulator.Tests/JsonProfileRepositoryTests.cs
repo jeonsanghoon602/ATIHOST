@@ -190,6 +190,25 @@ namespace HostSimulator.Tests
         }
 
         [Fact]
+        public void Null_json_array_item_throws_validation_exception()
+        {
+            File.WriteAllText(_filePath, "[null]");
+            var repo = new JsonProfileRepository(_filePath);
+
+            var ex = Assert.Throws<ProfileValidationException>(() => repo.LoadAll());
+            Assert.Contains("null", ex.Message);
+        }
+
+        [Fact]
+        public void Malformed_json_throws_validation_exception()
+        {
+            File.WriteAllText(_filePath, "[{]");
+            var repo = new JsonProfileRepository(_filePath);
+
+            Assert.Throws<ProfileValidationException>(() => repo.LoadAll());
+        }
+
+        [Fact]
         public void SaveAll_rejects_duplicate_names()
         {
             var repo = new JsonProfileRepository(_filePath);
