@@ -129,10 +129,38 @@ namespace HostSimulator.Tests
         [Fact]
         public void Invalid_json_profile_throws_validation_exception()
         {
-            File.WriteAllText(_filePath, @"[{""profileName"":"""",""ipAddress"":""invalid"",""port"":0,""deviceId"":-1,""t3"":0,""t5"":0,""t6"":0,""t7"":0,""t8"":0,""reconnectIntervalSeconds"":0}]");
+            File.WriteAllText(_filePath, @"[{""profileName"":"""",""ipAddress"":""invalid"",""port"":0,""isActive"":true,""deviceId"":-1,""t3"":0,""t5"":0,""t6"":0,""t7"":0,""t8"":0,""reconnectIntervalSeconds"":0}]");
             var repo = new JsonProfileRepository(_filePath);
 
             Assert.Throws<ProfileValidationException>(() => repo.LoadAll());
+        }
+
+        [Fact]
+        public void Missing_required_field_isActive_throws()
+        {
+            File.WriteAllText(_filePath, @"[{""profileName"":""EQ01"",""ipAddress"":""192.168.1.100"",""port"":5000,""deviceId"":0}]");
+            var repo = new JsonProfileRepository(_filePath);
+
+            Assert.Throws<ProfileValidationException>(() => repo.LoadAll());
+        }
+
+        [Fact]
+        public void Missing_required_field_deviceId_throws()
+        {
+            File.WriteAllText(_filePath, @"[{""profileName"":""EQ01"",""ipAddress"":""192.168.1.100"",""port"":5000,""isActive"":true}]");
+            var repo = new JsonProfileRepository(_filePath);
+
+            Assert.Throws<ProfileValidationException>(() => repo.LoadAll());
+        }
+
+        [Fact]
+        public void Atomic_save_does_not_leave_temp_file()
+        {
+            var repo = new JsonProfileRepository(_filePath);
+            repo.Save(CreateProfile());
+
+            Assert.False(File.Exists(_filePath + ".tmp"));
+            Assert.True(File.Exists(_filePath));
         }
     }
 }

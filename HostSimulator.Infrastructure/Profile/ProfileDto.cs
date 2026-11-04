@@ -4,19 +4,19 @@ namespace HostSimulator.Infrastructure.Profile
 {
     internal sealed class ProfileDto
     {
-        [JsonProperty("profileName")]
+        [JsonProperty("profileName", Required = Required.Always)]
         public string ProfileName { get; set; }
 
-        [JsonProperty("ipAddress")]
+        [JsonProperty("ipAddress", Required = Required.Always)]
         public string IpAddress { get; set; }
 
-        [JsonProperty("port")]
+        [JsonProperty("port", Required = Required.Always)]
         public int Port { get; set; }
 
-        [JsonProperty("isActive")]
+        [JsonProperty("isActive", Required = Required.Always)]
         public bool IsActive { get; set; }
 
-        [JsonProperty("deviceId")]
+        [JsonProperty("deviceId", Required = Required.Always)]
         public int DeviceId { get; set; }
 
         [JsonProperty("t3")]

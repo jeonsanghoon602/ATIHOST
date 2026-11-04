@@ -84,11 +84,11 @@ namespace HostSimulator.Tests
 
         [Theory]
         [InlineData(-1)]
-        [InlineData(32768)]
+        [InlineData(65536)]
         public void DeviceId_out_of_range_is_rejected(int deviceId)
         {
             var ex = Assert.Throws<ProfileValidationException>(() => CreateValid(deviceId: deviceId));
-            Assert.Contains("DeviceId must be between 0 and 32767", ex.Message);
+            Assert.Contains("DeviceId must be between 0 and 65535", ex.Message);
         }
 
         [Theory]
@@ -166,6 +166,28 @@ namespace HostSimulator.Tests
         }
 
         [Fact]
+        public void ReconnectInterval_less_than_T5_is_rejected()
+        {
+            var ex = Assert.Throws<ProfileValidationException>(() =>
+                CreateValid(t5: 10, reconnectIntervalSeconds: 5));
+            Assert.Contains("ReconnectIntervalSeconds (5) must be >= T5 (10)", ex.Message);
+        }
+
+        [Fact]
+        public void ReconnectInterval_equal_to_T5_is_accepted()
+        {
+            var profile = CreateValid(t5: 10, reconnectIntervalSeconds: 10);
+            Assert.Equal(10, profile.ReconnectIntervalSeconds);
+        }
+
+        [Fact]
+        public void DeviceId_65535_is_accepted()
+        {
+            var profile = CreateValid(deviceId: 65535);
+            Assert.Equal(65535, profile.DeviceId);
+        }
+
+        [Fact]
         public void Boundary_values_are_accepted()
         {
             var profile = new EquipmentProfile(
@@ -174,7 +196,7 @@ namespace HostSimulator.Tests
             Assert.Equal("Boundary", profile.ProfileName);
 
             var profileMax = new EquipmentProfile(
-                "Max", "255.255.255.255", 65535, true, 32767,
+                "Max", "255.255.255.255", 65535, true, 65535,
                 120, 240, 240, 240, 120, true, 600);
             Assert.Equal("Max", profileMax.ProfileName);
         }

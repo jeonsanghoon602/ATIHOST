@@ -76,9 +76,10 @@ namespace HostSimulator.Domain
             if (port < 1 || port > 65535)
                 errors.Add($"Port must be between 1 and 65535, but was {port}.");
 
-            if (deviceId < 0 || deviceId > 32767)
-                errors.Add($"DeviceId must be between 0 and 32767, but was {deviceId}.");
+            if (deviceId < 0 || deviceId > 65535)
+                errors.Add($"DeviceId must be between 0 and 65535, but was {deviceId}.");
 
+            // SEMI E37 standard timer ranges
             ValidateTimer(errors, nameof(T3), t3, 1, 120);
             ValidateTimer(errors, nameof(T5), t5, 1, 240);
             ValidateTimer(errors, nameof(T6), t6, 1, 240);
@@ -87,6 +88,9 @@ namespace HostSimulator.Domain
 
             if (reconnectIntervalSeconds < 1 || reconnectIntervalSeconds > 600)
                 errors.Add($"ReconnectIntervalSeconds must be between 1 and 600, but was {reconnectIntervalSeconds}.");
+
+            if (reconnectIntervalSeconds < t5 && reconnectIntervalSeconds >= 1 && t5 >= 1 && t5 <= 240)
+                errors.Add($"ReconnectIntervalSeconds ({reconnectIntervalSeconds}) must be >= T5 ({t5}).");
 
             return errors;
         }

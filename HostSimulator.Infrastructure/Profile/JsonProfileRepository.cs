@@ -25,7 +25,17 @@ namespace HostSimulator.Infrastructure.Profile
                 return Array.Empty<EquipmentProfile>();
 
             var json = File.ReadAllText(_filePath, Encoding.UTF8);
-            var dtos = JsonConvert.DeserializeObject<List<ProfileDto>>(json);
+
+            List<ProfileDto> dtos;
+            try
+            {
+                dtos = JsonConvert.DeserializeObject<List<ProfileDto>>(json);
+            }
+            catch (JsonSerializationException ex)
+            {
+                throw new ProfileValidationException(new[] { "Required JSON property missing: " + ex.Message });
+            }
+
             if (dtos == null)
                 return Array.Empty<EquipmentProfile>();
 
@@ -67,7 +77,11 @@ namespace HostSimulator.Infrastructure.Profile
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 Directory.CreateDirectory(directory);
 
-            File.WriteAllText(_filePath, json, Encoding.UTF8);
+            var tempPath = _filePath + ".tmp";
+            File.WriteAllText(tempPath, json, Encoding.UTF8);
+            if (File.Exists(_filePath))
+                File.Delete(_filePath);
+            File.Move(tempPath, _filePath);
         }
 
         private static EquipmentProfile ToProfile(ProfileDto dto)
