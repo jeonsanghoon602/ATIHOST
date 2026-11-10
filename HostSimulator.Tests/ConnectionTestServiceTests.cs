@@ -22,7 +22,7 @@ namespace HostSimulator.Tests
         private class StubAdapter : IProtocolAdapter
         {
             public ProtocolConnectionState State { get; private set; } = ProtocolConnectionState.Disconnected;
-            public event EventHandler<ProtocolConnectionState> StateChanged;
+            public event EventHandler<StateChangedEventArgs> StateChanged;
             public int ConnectCount { get; private set; }
             public int DisconnectCount { get; private set; }
             public int FailOnCycle { get; set; }
@@ -35,17 +35,24 @@ namespace HostSimulator.Tests
                     throw new InvalidOperationException("Simulated failure");
                 if (SimulateTimeout)
                     throw new TimeoutException("Simulated timeout");
+                var prev = State;
                 State = ProtocolConnectionState.Connected;
-                StateChanged?.Invoke(this, State);
+                StateChanged?.Invoke(this, new StateChangedEventArgs(prev, State, StateChangeReason.ConnectionEstablished));
                 return Task.CompletedTask;
             }
 
             public Task DisconnectAsync()
             {
                 DisconnectCount++;
+                var prev = State;
                 State = ProtocolConnectionState.Disconnected;
-                StateChanged?.Invoke(this, State);
+                StateChanged?.Invoke(this, new StateChangedEventArgs(prev, State, StateChangeReason.UserRequest));
                 return Task.CompletedTask;
+            }
+
+            public Task<bool> LinktestAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(State == ProtocolConnectionState.Selected);
             }
 
             public void Dispose() { }
