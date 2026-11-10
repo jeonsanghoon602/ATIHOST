@@ -22,6 +22,8 @@ namespace HostSimulator.Application
         public ProtocolConnectionState State { get; private set; } = ProtocolConnectionState.Disconnected;
 
         public event EventHandler<StateChangedEventArgs> StateChanged;
+        public event EventHandler<PrimaryMessageReceivedEventArgs> PrimaryMessageReceived;
+        public event EventHandler<SecsMessageData> UnexpectedMessageReceived;
 
         public HsmsConnectionManager(Func<IProtocolAdapter> adapterFactory, ILogger logger)
         {
@@ -122,6 +124,46 @@ namespace HostSimulator.Application
             return adapter.LinktestAsync(timeout, cancellationToken);
         }
 
+        public Task<MessageSendResult> SendAsync(SecsMessageData message, CancellationToken cancellationToken = default)
+        {
+            if (message == null)
+                throw new ArgumentNullException(nameof(message));
+
+            IProtocolAdapter adapter;
+            lock (_lock)
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException(nameof(HsmsConnectionManager));
+                adapter = _adapter;
+            }
+
+            if (adapter == null)
+                return Task.FromResult(MessageSendResult.NotConnected());
+
+            return adapter.SendAsync(message, cancellationToken);
+        }
+
+        public Task ReplyAsync(SecsMessageData primaryMessage, SecsMessageData replyMessage)
+        {
+            if (primaryMessage == null)
+                throw new ArgumentNullException(nameof(primaryMessage));
+            if (replyMessage == null)
+                throw new ArgumentNullException(nameof(replyMessage));
+
+            IProtocolAdapter adapter;
+            lock (_lock)
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException(nameof(HsmsConnectionManager));
+                adapter = _adapter;
+            }
+
+            if (adapter == null)
+                throw new InvalidOperationException("Not connected.");
+
+            return adapter.ReplyAsync(primaryMessage, replyMessage);
+        }
+
         public void Dispose()
         {
             CancellationTokenSource reconnectCts;
@@ -140,6 +182,8 @@ namespace HostSimulator.Application
             if (_adapter != null)
             {
                 _adapter.StateChanged -= OnAdapterStateChanged;
+                _adapter.PrimaryMessageReceived -= OnAdapterPrimaryMessageReceived;
+                _adapter.UnexpectedMessageReceived -= OnAdapterUnexpectedMessageReceived;
                 _adapter.Dispose();
                 _adapter = null;
             }
@@ -157,6 +201,8 @@ namespace HostSimulator.Application
 
             var adapter = _adapterFactory();
             adapter.StateChanged += OnAdapterStateChanged;
+            adapter.PrimaryMessageReceived += OnAdapterPrimaryMessageReceived;
+            adapter.UnexpectedMessageReceived += OnAdapterUnexpectedMessageReceived;
 
             lock (_lock) { _adapter = adapter; }
 
@@ -172,6 +218,8 @@ namespace HostSimulator.Application
                         _adapter = null;
                 }
                 adapter.StateChanged -= OnAdapterStateChanged;
+                adapter.PrimaryMessageReceived -= OnAdapterPrimaryMessageReceived;
+                adapter.UnexpectedMessageReceived -= OnAdapterUnexpectedMessageReceived;
                 try { await adapter.DisconnectAsync().ConfigureAwait(false); }
                 catch { }
                 adapter.Dispose();
@@ -191,6 +239,8 @@ namespace HostSimulator.Application
             if (adapter != null)
             {
                 adapter.StateChanged -= OnAdapterStateChanged;
+                adapter.PrimaryMessageReceived -= OnAdapterPrimaryMessageReceived;
+                adapter.UnexpectedMessageReceived -= OnAdapterUnexpectedMessageReceived;
                 try { await adapter.DisconnectAsync().ConfigureAwait(false); }
                 catch { /* best-effort cleanup */ }
                 adapter.Dispose();
@@ -270,6 +320,16 @@ namespace HostSimulator.Application
                 if (shouldRetry)
                     ScheduleReconnect();
             }
+        }
+
+        private void OnAdapterPrimaryMessageReceived(object sender, PrimaryMessageReceivedEventArgs e)
+        {
+            PrimaryMessageReceived?.Invoke(this, e);
+        }
+
+        private void OnAdapterUnexpectedMessageReceived(object sender, SecsMessageData e)
+        {
+            UnexpectedMessageReceived?.Invoke(this, e);
         }
 
         private void SetState(ProtocolConnectionState newState, StateChangeReason reason)

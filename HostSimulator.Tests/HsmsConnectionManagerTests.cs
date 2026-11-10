@@ -29,6 +29,8 @@ namespace HostSimulator.Tests
         {
             public ProtocolConnectionState State { get; private set; } = ProtocolConnectionState.Disconnected;
             public event EventHandler<StateChangedEventArgs> StateChanged;
+            public event EventHandler<PrimaryMessageReceivedEventArgs> PrimaryMessageReceived;
+            public event EventHandler<SecsMessageData> UnexpectedMessageReceived;
             public int ConnectCount { get; private set; }
             public int DisconnectCount { get; private set; }
             public bool FailConnect { get; set; }
@@ -70,6 +72,16 @@ namespace HostSimulator.Tests
             public Task<bool> LinktestAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
             {
                 return Task.FromResult(LinktestResult);
+            }
+
+            public Task<MessageSendResult> SendAsync(SecsMessageData message, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(MessageSendResult.NotConnected());
+            }
+
+            public Task ReplyAsync(SecsMessageData primaryMessage, SecsMessageData replyMessage)
+            {
+                return Task.CompletedTask;
             }
 
             public void SimulateConnectionLoss()
