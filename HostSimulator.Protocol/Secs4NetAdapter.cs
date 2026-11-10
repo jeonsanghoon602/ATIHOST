@@ -11,9 +11,13 @@ namespace HostSimulator.Protocol
     {
         private readonly ISecsGemLogger _secsLogger;
         private readonly Domain.ILogger _logger;
+        private readonly IMessageLogger _messageLogger;
         private readonly HsmsStateMachine _stateMachine;
+        private readonly SystemByteGenerator _systemByteGenerator = new SystemByteGenerator();
         private HsmsConnection _connection;
+        private SecsGem _secsGem;
         private CancellationTokenSource _lifetimeCts;
+        private Task _receiveTask;
         private readonly object _lock = new object();
         private bool _disposed;
 
@@ -25,9 +29,13 @@ namespace HostSimulator.Protocol
             remove { _stateMachine.StateChanged -= value; }
         }
 
-        public Secs4NetAdapter(Domain.ILogger logger)
+        public event EventHandler<PrimaryMessageReceivedEventArgs> PrimaryMessageReceived;
+        public event EventHandler<SecsMessageData> UnexpectedMessageReceived;
+
+        public Secs4NetAdapter(Domain.ILogger logger, IMessageLogger messageLogger = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _messageLogger = messageLogger;
             _secsLogger = new Secs4NetLoggerBridge(logger);
             _stateMachine = new HsmsStateMachine(logger);
         }
@@ -43,6 +51,7 @@ namespace HostSimulator.Protocol
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be greater than zero.");
 
             HsmsConnection conn;
+            SecsGem gem;
             CancellationTokenSource lifetimeCts;
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -71,8 +80,10 @@ namespace HostSimulator.Protocol
 
                 lifetimeCts = new CancellationTokenSource();
                 conn = new HsmsConnection(options, _secsLogger);
+                gem = new SecsGem(options, conn, _secsLogger);
                 conn.ConnectionChanged += OnConnectionChanged;
                 _connection = conn;
+                _secsGem = gem;
                 _lifetimeCts = lifetimeCts;
             }
 
@@ -131,14 +142,20 @@ namespace HostSimulator.Protocol
         public async Task DisconnectAsync()
         {
             HsmsConnection conn;
+            SecsGem gem;
             CancellationTokenSource lifetimeCts;
+            Task receiveTask;
 
             lock (_lock)
             {
                 conn = _connection;
                 _connection = null;
+                gem = _secsGem;
+                _secsGem = null;
                 lifetimeCts = _lifetimeCts;
                 _lifetimeCts = null;
+                receiveTask = _receiveTask;
+                _receiveTask = null;
             }
 
             _stateMachine.TryTransition(ProtocolConnectionState.Disconnecting, StateChangeReason.UserRequest);
@@ -148,6 +165,16 @@ namespace HostSimulator.Protocol
                 lifetimeCts.Cancel();
                 lifetimeCts.Dispose();
             }
+
+            if (receiveTask != null)
+            {
+                try { await receiveTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { _logger.Warn($"Receive loop error on disconnect: {ex.Message}"); }
+            }
+
+            if (gem != null)
+                gem.Dispose();
 
             if (conn != null)
             {
@@ -214,9 +241,104 @@ namespace HostSimulator.Protocol
             }
         }
 
+        public async Task<MessageSendResult> SendAsync(SecsMessageData message, CancellationToken cancellationToken = default)
+        {
+            if (message == null)
+                throw new ArgumentNullException(nameof(message));
+
+            SecsGem gem;
+            lock (_lock)
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException(nameof(Secs4NetAdapter));
+                gem = _secsGem;
+            }
+
+            if (gem == null || State != ProtocolConnectionState.Selected)
+                return MessageSendResult.NotConnected();
+
+            var systemByte = _systemByteGenerator.Next();
+            var outgoing = new SecsMessageData(
+                message.Stream, message.Function, message.WBit, systemByte,
+                message.Item, message.RawBytes, message.Timestamp);
+
+            var secsMsg = SecsMessageConverter.ToSecs4Net(outgoing);
+            LogMessage(outgoing, MessageDirection.Sent);
+            _logger.Info($"Send: {outgoing.ToHeaderString()}");
+
+            try
+            {
+                var reply = await gem.SendAsync(secsMsg, cancellationToken).ConfigureAwait(false);
+
+                if (reply == null)
+                {
+                    if (!message.WBit)
+                        return MessageSendResult.Success(outgoing);
+                    return MessageSendResult.Error("No reply received");
+                }
+
+                var replyData = SecsMessageConverter.FromSecs4Net(reply, systemByte);
+                LogMessage(replyData, MessageDirection.Received);
+
+                if (reply.F == 0)
+                {
+                    _logger.Warn($"Abort received: {replyData.ToHeaderString()}");
+                    return MessageSendResult.Abort(replyData);
+                }
+
+                if (reply.S == 9)
+                {
+                    _logger.Warn($"S9 error received: {replyData.ToHeaderString()}");
+                    return MessageSendResult.Error($"S9 error: {replyData.ToHeaderString()}");
+                }
+
+                _logger.Info($"Reply: {replyData.ToHeaderString()}");
+                return MessageSendResult.Success(replyData);
+            }
+            catch (SecsException ex) when (ex.Message != null && ex.Message.Contains("T3"))
+            {
+                _logger.Warn($"T3 timeout: SystemByte={systemByte}, S{message.Stream}F{message.Function}");
+                return MessageSendResult.T3Timeout(systemByte);
+            }
+            catch (SecsException ex)
+            {
+                _logger.Error($"SECS error: {ex.Message}");
+                return MessageSendResult.Error(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Send failed: {ex.Message}");
+                return MessageSendResult.Error(ex.Message);
+            }
+        }
+
+        public Task ReplyAsync(SecsMessageData primaryMessage, SecsMessageData replyMessage)
+        {
+            if (primaryMessage == null)
+                throw new ArgumentNullException(nameof(primaryMessage));
+            if (replyMessage == null)
+                throw new ArgumentNullException(nameof(replyMessage));
+
+            lock (_lock)
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException(nameof(Secs4NetAdapter));
+            }
+
+            if (State != ProtocolConnectionState.Selected)
+                throw new InvalidOperationException("Not in Selected state.");
+
+            var secsReply = SecsMessageConverter.ToSecs4Net(replyMessage);
+            LogMessage(replyMessage, MessageDirection.Sent);
+            _logger.Info($"Reply sent: {replyMessage.ToHeaderString()}");
+
+            return Task.CompletedTask;
+        }
+
         public void Dispose()
         {
             HsmsConnection conn;
+            SecsGem gem;
             CancellationTokenSource lifetimeCts;
 
             lock (_lock)
@@ -225,6 +347,8 @@ namespace HostSimulator.Protocol
                 _disposed = true;
                 conn = _connection;
                 _connection = null;
+                gem = _secsGem;
+                _secsGem = null;
                 lifetimeCts = _lifetimeCts;
                 _lifetimeCts = null;
             }
@@ -234,6 +358,9 @@ namespace HostSimulator.Protocol
                 lifetimeCts.Cancel();
                 lifetimeCts.Dispose();
             }
+
+            if (gem != null)
+                gem.Dispose();
 
             if (conn != null)
             {
@@ -247,14 +374,20 @@ namespace HostSimulator.Protocol
         private async Task CleanupConnectionAsync()
         {
             HsmsConnection conn;
+            SecsGem gem;
             CancellationTokenSource lifetimeCts;
+            Task receiveTask;
 
             lock (_lock)
             {
                 conn = _connection;
                 _connection = null;
+                gem = _secsGem;
+                _secsGem = null;
                 lifetimeCts = _lifetimeCts;
                 _lifetimeCts = null;
+                receiveTask = _receiveTask;
+                _receiveTask = null;
             }
 
             if (lifetimeCts != null)
@@ -262,6 +395,15 @@ namespace HostSimulator.Protocol
                 lifetimeCts.Cancel();
                 lifetimeCts.Dispose();
             }
+
+            if (receiveTask != null)
+            {
+                try { await receiveTask.ConfigureAwait(false); }
+                catch { }
+            }
+
+            if (gem != null)
+                gem.Dispose();
 
             if (conn != null)
             {
@@ -292,7 +434,109 @@ namespace HostSimulator.Protocol
             {
                 var conn = _connection;
                 if (conn != null)
+                {
                     conn.LinkTestEnabled = true;
+                    StartReceiveLoop();
+                }
+            }
+        }
+
+        private void StartReceiveLoop()
+        {
+            CancellationToken ct;
+            lock (_lock)
+            {
+                if (_lifetimeCts == null || _lifetimeCts.IsCancellationRequested)
+                    return;
+                ct = _lifetimeCts.Token;
+                if (_receiveTask != null && !_receiveTask.IsCompleted)
+                    return;
+                var gem = _secsGem;
+                if (gem == null)
+                    return;
+                _receiveTask = Task.Run(() => ReceiveLoopAsync(gem, ct), ct);
+            }
+        }
+
+        private async Task ReceiveLoopAsync(ISecsGem gem, CancellationToken ct)
+        {
+            try
+            {
+                var enumerator = gem.GetPrimaryMessageAsync(ct).GetAsyncEnumerator(ct);
+                try
+                {
+                    while (await enumerator.MoveNextAsync().ConfigureAwait(false))
+                    {
+                        var wrapper = enumerator.Current;
+                        try
+                        {
+                            HandlePrimaryMessage(wrapper);
+                        }
+                        finally
+                        {
+                            // PrimaryMessageWrapper does not implement IDisposable;
+                            // SecsMessage (PrimaryMessage) does — dispose it.
+                            wrapper.PrimaryMessage?.Dispose();
+                        }
+                    }
+                }
+                finally
+                {
+                    await enumerator.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.Error($"Receive loop error: {ex.Message}");
+            }
+        }
+
+        private void HandlePrimaryMessage(PrimaryMessageWrapper wrapper)
+        {
+            try
+            {
+                var msg = wrapper.PrimaryMessage;
+                var systemByte = _systemByteGenerator.Next();
+                var data = SecsMessageConverter.FromSecs4Net(msg, systemByte);
+                LogMessage(data, MessageDirection.Received);
+                _logger.Info($"Primary received: {data.ToHeaderString()}");
+
+                if (msg.S == 9)
+                {
+                    _logger.Warn($"S9 error message received: {data.ToHeaderString()}");
+                    UnexpectedMessageReceived?.Invoke(this, data);
+                    return;
+                }
+
+                if (msg.F == 0)
+                {
+                    _logger.Warn($"SxF0 abort message received: {data.ToHeaderString()}");
+                    UnexpectedMessageReceived?.Invoke(this, data);
+                    return;
+                }
+
+                PrimaryMessageReceived?.Invoke(this, new PrimaryMessageReceivedEventArgs(data));
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Error handling primary message: {ex.Message}");
+            }
+        }
+
+        private void LogMessage(SecsMessageData message, MessageDirection direction)
+        {
+            if (_messageLogger == null)
+                return;
+
+            try
+            {
+                var entry = MessageLogEntry.FromMessage(message, direction);
+                _messageLogger.Log(entry);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Message logging failed: {ex.Message}");
             }
         }
 
