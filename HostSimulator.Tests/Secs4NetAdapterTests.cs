@@ -233,12 +233,11 @@ namespace HostSimulator.Tests
         }
 
         [Fact]
-        public async Task SendAsync_FallbackSystemByte_WhenLoggerMisses()
+        public async Task SendAsync_T3Timeout_StillLogsSentEntry()
         {
             var gem = new FakeSecsGem
             {
-                OnSendAsync = (msg, ct) =>
-                    Task.FromResult(new SecsMessage(msg.S, (byte)(msg.F + 1), false))
+                OnSendAsync = (msg, ct) => throw new SecsException("T3 timeout expired")
             };
             var msgLogger = new StubMessageLogger();
             var adapter = CreateAdapter(gem, msgLogger: msgLogger);
@@ -246,8 +245,10 @@ namespace HostSimulator.Tests
             var message = new SecsMessageData(1, 13, true, 0, null);
             var result = await adapter.SendAsync(message);
 
-            Assert.True(result.IsSuccess);
-            Assert.True(msgLogger.Entries.Count >= 1);
+            Assert.Equal(MessageSendStatus.T3Timeout, result.Status);
+            Assert.True(msgLogger.Entries.Count >= 1,
+                "Sent log entry should be written even on T3 timeout");
+            Assert.Equal(MessageDirection.Sent, msgLogger.Entries[0].Direction);
         }
 
         #endregion
@@ -392,7 +393,7 @@ namespace HostSimulator.Tests
         }
 
         [Fact]
-        public async Task ReplyAsync_FailedTryReply_DoesNotLogSent()
+        public async Task ReplyAsync_FailedTryReply_ThrowsInvalidOperation()
         {
             var gem = new FakeSecsGem();
             var msgLogger = new StubMessageLogger();
@@ -403,13 +404,12 @@ namespace HostSimulator.Tests
                 msg, 888u,
                 (reply, ct) => Task.FromResult(false));
 
-            var entriesBefore = msgLogger.Entries.Count;
             var primary = new SecsMessageData(1, 1, true, 888u, null);
             var replyData = new SecsMessageData(1, 2, false, 888u, SecsItemData.U1(0));
-            await adapter.ReplyAsync(primary, replyData);
 
-            for (var i = entriesBefore; i < msgLogger.Entries.Count; i++)
-                Assert.NotEqual(MessageDirection.Sent, msgLogger.Entries[i].Direction);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => adapter.ReplyAsync(primary, replyData));
+            Assert.Contains("Reply rejected", ex.Message);
         }
 
         [Fact]
@@ -564,6 +564,25 @@ namespace HostSimulator.Tests
 
             var msg = new SecsMessage(6, 11, true) { SecsItem = Item.L() };
             adapter.HandlePrimaryMessageCore(msg, 42u, (reply, ct) => Task.FromResult(true));
+        }
+
+        [Fact]
+        public void HandlePrimaryMessageCore_ReplaceSameSystemByte_DisposesOldContext()
+        {
+            var gem = new FakeSecsGem();
+            var adapter = CreateAdapter(gem);
+
+            var msg1 = new SecsMessage(1, 1, true);
+            adapter.HandlePrimaryMessageCore(
+                msg1, 500u, (reply, ct) => Task.FromResult(true));
+
+            var msg2 = new SecsMessage(1, 1, true);
+            adapter.HandlePrimaryMessageCore(
+                msg2, 500u, (reply, ct) => Task.FromResult(true));
+
+            var primary = new SecsMessageData(1, 1, true, 500u, null);
+            var replyData = new SecsMessageData(1, 2, false, 500u, null);
+            adapter.ReplyAsync(primary, replyData).GetAwaiter().GetResult();
         }
 
         [Fact]

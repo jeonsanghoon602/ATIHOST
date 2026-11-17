@@ -14,7 +14,6 @@ namespace HostSimulator.Protocol
         private readonly Domain.ILogger _logger;
         private readonly IMessageLogger _messageLogger;
         private readonly HsmsStateMachine _stateMachine;
-        private readonly SystemByteGenerator _systemByteGenerator = new SystemByteGenerator();
         private readonly ConcurrentDictionary<uint, PrimaryMessageContext> _pendingPrimaries
             = new ConcurrentDictionary<uint, PrimaryMessageContext>();
         private HsmsConnection _connection;
@@ -284,26 +283,35 @@ namespace HostSimulator.Protocol
             try
             {
                 secsMsg = SecsMessageConverter.ToSecs4Net(message);
+                _secsLoggerBridge.TrackOutbound(secsMsg);
 
                 SecsMessage reply = null;
+                SecsException secsError = null;
                 try
                 {
                     reply = await gem.SendAsync(secsMsg, cancellationToken).ConfigureAwait(false);
+                }
+                catch (SecsException ex)
+                {
+                    secsError = ex;
+                }
 
-                    uint systemByte;
-                    if (_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
-                        systemByte = unchecked((uint)wireId);
-                    else
-                        systemByte = _systemByteGenerator.Next();
+                uint systemByte = 0;
+                if (_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
+                    systemByte = unchecked((uint)wireId);
 
-                    var rawBytes = SecsMessageConverter.EncodeRawBytes(secsMsg, systemByte, deviceId);
-                    var outgoing = new SecsMessageData(
-                        message.Stream, message.Function, message.WBit, systemByte,
-                        message.Item, rawBytes);
+                var rawBytes = SecsMessageConverter.EncodeRawBytes(secsMsg, systemByte, deviceId);
+                var outgoing = new SecsMessageData(
+                    message.Stream, message.Function, message.WBit, systemByte,
+                    message.Item, rawBytes);
+                LogMessage(outgoing, MessageDirection.Sent);
+                _logger.Info($"Send: {outgoing.ToHeaderString()}");
 
-                    LogMessage(outgoing, MessageDirection.Sent);
-                    _logger.Info($"Send: {outgoing.ToHeaderString()}");
+                if (secsError != null)
+                    return HandleSecsException(secsError, message, systemByte, deviceId);
 
+                try
+                {
                     if (reply == null)
                     {
                         if (!message.WBit)
@@ -334,15 +342,6 @@ namespace HostSimulator.Protocol
                     reply?.Dispose();
                 }
             }
-            catch (SecsException ex)
-            {
-                uint systemByte;
-                if (_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
-                    systemByte = unchecked((uint)wireId);
-                else
-                    systemByte = _systemByteGenerator.Next();
-                return HandleSecsException(ex, message, systemByte, deviceId);
-            }
             catch (Exception ex)
             {
                 _logger.Error($"Send failed: {ex.Message}");
@@ -350,6 +349,8 @@ namespace HostSimulator.Protocol
             }
             finally
             {
+                if (secsMsg != null)
+                    _secsLoggerBridge.UntrackOutbound(secsMsg);
                 secsMsg?.Dispose();
             }
         }
@@ -429,15 +430,15 @@ namespace HostSimulator.Protocol
                     replyMessage.Stream, replyMessage.Function, replyMessage.WBit,
                     primaryMessage.SystemByte, replyMessage.Item, rawBytes);
 
-                if (sent)
+                if (!sent)
                 {
-                    LogMessage(replyWithRaw, MessageDirection.Sent);
-                    _logger.Info($"Reply sent: {replyWithRaw.ToHeaderString()}");
+                    throw new InvalidOperationException(
+                        $"Reply rejected for SystemByte={primaryMessage.SystemByte}. " +
+                        "The message was already replied to or the context expired.");
                 }
-                else
-                {
-                    _logger.Warn($"Reply failed (already replied or expired): {replyWithRaw.ToHeaderString()}");
-                }
+
+                LogMessage(replyWithRaw, MessageDirection.Sent);
+                _logger.Info($"Reply sent: {replyWithRaw.ToHeaderString()}");
             }
             finally
             {
@@ -678,6 +679,12 @@ namespace HostSimulator.Protocol
                 if (msg.ReplyExpected)
                 {
                     var context = new PrimaryMessageContext(systemByte, msg, tryReplyAsync);
+                    if (_pendingPrimaries.TryRemove(systemByte, out var oldContext))
+                    {
+                        _logger.Warn($"Replacing existing pending primary for SystemByte={systemByte}");
+                        try { oldContext.Dispose(); }
+                        catch { }
+                    }
                     _pendingPrimaries[systemByte] = context;
                 }
 

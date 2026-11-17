@@ -8,12 +8,29 @@ namespace HostSimulator.Protocol
     internal sealed class Secs4NetLoggerBridge : ISecsGemLogger
     {
         private readonly DomainLogger _logger;
+        private readonly ConcurrentDictionary<SecsMessage, bool> _tracked
+            = new ConcurrentDictionary<SecsMessage, bool>();
         private readonly ConcurrentDictionary<SecsMessage, int> _outboundIds
             = new ConcurrentDictionary<SecsMessage, int>();
 
         public Secs4NetLoggerBridge(DomainLogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        public void TrackOutbound(SecsMessage msg)
+        {
+            if (msg != null)
+                _tracked[msg] = true;
+        }
+
+        public void UntrackOutbound(SecsMessage msg)
+        {
+            if (msg != null)
+            {
+                _tracked.TryRemove(msg, out _);
+                _outboundIds.TryRemove(msg, out _);
+            }
         }
 
         public void Info(string msg) => _logger.Info(msg);
@@ -41,14 +58,18 @@ namespace HostSimulator.Protocol
         public void MessageOut(SecsMessage msg, int id)
         {
             _logger.Info("SECS OUT [" + id + "]: " + msg);
-            if (msg != null)
+            if (msg != null && _tracked.ContainsKey(msg))
                 _outboundIds[msg] = id;
         }
 
         public bool TryGetOutboundId(SecsMessage msg, out int id)
         {
-            if (msg != null && _outboundIds.TryRemove(msg, out id))
-                return true;
+            if (msg != null)
+            {
+                _tracked.TryRemove(msg, out _);
+                if (_outboundIds.TryRemove(msg, out id))
+                    return true;
+            }
             id = 0;
             return false;
         }
