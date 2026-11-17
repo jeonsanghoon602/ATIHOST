@@ -58,7 +58,7 @@ namespace HostSimulator.Protocol
             };
         }
 
-        public static SecsMessageData FromSecs4Net(SecsMessage message, uint systemByte)
+        public static SecsMessageData FromSecs4Net(SecsMessage message, uint systemByte, ushort deviceId = 0)
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
@@ -67,7 +67,7 @@ namespace HostSimulator.Protocol
             byte[] rawBytes = null;
             try
             {
-                rawBytes = EncodeRawBytes(message);
+                rawBytes = EncodeRawBytes(message, systemByte, deviceId);
             }
             catch
             {
@@ -115,7 +115,7 @@ namespace HostSimulator.Protocol
                 case SecsDataFormat.I8:
                     return Item.I8((long[])data.Value);
                 case SecsDataFormat.Jis8:
-                    return Item.A((string)data.Value);
+                    return Item.J((string)data.Value);
                 default:
                     throw new ArgumentOutOfRangeException(nameof(data), $"Unsupported format: {data.Format}");
             }
@@ -181,14 +181,29 @@ namespace HostSimulator.Protocol
             }
         }
 
-        private static byte[] EncodeRawBytes(SecsMessage message)
+        internal static byte[] EncodeRawBytes(SecsMessage message, uint systemByte, ushort deviceId = 0)
         {
-            if (message.SecsItem == null)
-                return Array.Empty<byte>();
+            var itemWriter = new SimpleBufferWriter();
+            if (message.SecsItem != null)
+                message.SecsItem.EncodeTo(itemWriter);
+            var itemBytes = itemWriter.ToArray();
 
-            var writer = new SimpleBufferWriter();
-            message.SecsItem.EncodeTo(writer);
-            return writer.ToArray();
+            var result = new byte[10 + itemBytes.Length];
+            result[0] = (byte)((deviceId >> 8) & 0x7F);
+            result[1] = (byte)(deviceId & 0xFF);
+            result[2] = (byte)((message.ReplyExpected ? 0x80 : 0x00) | (message.S & 0x7F));
+            result[3] = message.F;
+            result[4] = 0; // PType
+            result[5] = 0; // SType (data message)
+            result[6] = (byte)((systemByte >> 24) & 0xFF);
+            result[7] = (byte)((systemByte >> 16) & 0xFF);
+            result[8] = (byte)((systemByte >> 8) & 0xFF);
+            result[9] = (byte)(systemByte & 0xFF);
+
+            if (itemBytes.Length > 0)
+                Array.Copy(itemBytes, 0, result, 10, itemBytes.Length);
+
+            return result;
         }
     }
 }

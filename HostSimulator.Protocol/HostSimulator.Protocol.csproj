@@ -12,6 +12,11 @@
     <PackageReference Include="Secs4Net" Version="2.4.4" />
   </ItemGroup>
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>HostSimulator.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\HostSimulator.Domain\HostSimulator.Domain.csproj" />
   </ItemGroup>
 </Project>

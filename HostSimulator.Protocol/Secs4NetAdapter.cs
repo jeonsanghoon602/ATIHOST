@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using HostSimulator.Domain;
@@ -14,8 +15,10 @@ namespace HostSimulator.Protocol
         private readonly IMessageLogger _messageLogger;
         private readonly HsmsStateMachine _stateMachine;
         private readonly SystemByteGenerator _systemByteGenerator = new SystemByteGenerator();
+        private readonly ConcurrentDictionary<uint, PrimaryMessageContext> _pendingPrimaries
+            = new ConcurrentDictionary<uint, PrimaryMessageContext>();
         private HsmsConnection _connection;
-        private SecsGem _secsGem;
+        private ISecsGem _secsGem;
         private CancellationTokenSource _lifetimeCts;
         private Task _receiveTask;
         private readonly object _lock = new object();
@@ -38,6 +41,18 @@ namespace HostSimulator.Protocol
             _messageLogger = messageLogger;
             _secsLogger = new Secs4NetLoggerBridge(logger);
             _stateMachine = new HsmsStateMachine(logger);
+        }
+
+        internal Secs4NetAdapter(Domain.ILogger logger, IMessageLogger messageLogger,
+            ISecsGem testGem, ProtocolConnectionState initialState)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _messageLogger = messageLogger;
+            _secsLogger = new Secs4NetLoggerBridge(logger);
+            _stateMachine = new HsmsStateMachine(logger);
+            _secsGem = testGem;
+            if (initialState != ProtocolConnectionState.Disconnected)
+                _stateMachine.ForceState(initialState, StateChangeReason.SelectCompleted);
         }
 
         public async Task ConnectAsync(
@@ -142,7 +157,7 @@ namespace HostSimulator.Protocol
         public async Task DisconnectAsync()
         {
             HsmsConnection conn;
-            SecsGem gem;
+            ISecsGem gem;
             CancellationTokenSource lifetimeCts;
             Task receiveTask;
 
@@ -173,8 +188,10 @@ namespace HostSimulator.Protocol
                 catch (Exception ex) { _logger.Warn($"Receive loop error on disconnect: {ex.Message}"); }
             }
 
-            if (gem != null)
-                gem.Dispose();
+            DisposePendingPrimaries();
+
+            if (gem is IDisposable disposableGem)
+                disposableGem.Dispose();
 
             if (conn != null)
             {
@@ -246,7 +263,7 @@ namespace HostSimulator.Protocol
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
 
-            SecsGem gem;
+            ISecsGem gem;
             lock (_lock)
             {
                 if (_disposed)
@@ -258,61 +275,108 @@ namespace HostSimulator.Protocol
                 return MessageSendResult.NotConnected();
 
             var systemByte = _systemByteGenerator.Next();
-            var outgoing = new SecsMessageData(
-                message.Stream, message.Function, message.WBit, systemByte,
-                message.Item, message.RawBytes, message.Timestamp);
-
-            var secsMsg = SecsMessageConverter.ToSecs4Net(outgoing);
-            LogMessage(outgoing, MessageDirection.Sent);
-            _logger.Info($"Send: {outgoing.ToHeaderString()}");
-
+            SecsMessage secsMsg = null;
             try
             {
-                var reply = await gem.SendAsync(secsMsg, cancellationToken).ConfigureAwait(false);
+                secsMsg = SecsMessageConverter.ToSecs4Net(message);
+                var rawBytes = SecsMessageConverter.EncodeRawBytes(secsMsg, systemByte);
+                var outgoing = new SecsMessageData(
+                    message.Stream, message.Function, message.WBit, systemByte,
+                    message.Item, rawBytes);
 
-                if (reply == null)
+                LogMessage(outgoing, MessageDirection.Sent);
+                _logger.Info($"Send: {outgoing.ToHeaderString()}");
+
+                SecsMessage reply = null;
+                try
                 {
-                    if (!message.WBit)
-                        return MessageSendResult.Success(outgoing);
-                    return MessageSendResult.Error("No reply received");
+                    reply = await gem.SendAsync(secsMsg, cancellationToken).ConfigureAwait(false);
+
+                    if (reply == null)
+                    {
+                        if (!message.WBit)
+                            return MessageSendResult.Success(outgoing);
+                        return MessageSendResult.Error("No reply received");
+                    }
+
+                    var replyData = SecsMessageConverter.FromSecs4Net(reply, systemByte);
+                    LogMessage(replyData, MessageDirection.Received);
+
+                    if (reply.F == 0)
+                    {
+                        _logger.Warn($"Abort received: {replyData.ToHeaderString()}");
+                        return MessageSendResult.Abort(replyData);
+                    }
+
+                    if (reply.S == 9)
+                    {
+                        _logger.Warn($"S9 error received: {replyData.ToHeaderString()}");
+                        return MessageSendResult.Error($"S9 error: {replyData.ToHeaderString()}");
+                    }
+
+                    _logger.Info($"Reply: {replyData.ToHeaderString()}");
+                    return MessageSendResult.Success(replyData);
                 }
-
-                var replyData = SecsMessageConverter.FromSecs4Net(reply, systemByte);
-                LogMessage(replyData, MessageDirection.Received);
-
-                if (reply.F == 0)
+                finally
                 {
-                    _logger.Warn($"Abort received: {replyData.ToHeaderString()}");
-                    return MessageSendResult.Abort(replyData);
+                    reply?.Dispose();
                 }
-
-                if (reply.S == 9)
-                {
-                    _logger.Warn($"S9 error received: {replyData.ToHeaderString()}");
-                    return MessageSendResult.Error($"S9 error: {replyData.ToHeaderString()}");
-                }
-
-                _logger.Info($"Reply: {replyData.ToHeaderString()}");
-                return MessageSendResult.Success(replyData);
-            }
-            catch (SecsException ex) when (ex.Message != null && ex.Message.Contains("T3"))
-            {
-                _logger.Warn($"T3 timeout: SystemByte={systemByte}, S{message.Stream}F{message.Function}");
-                return MessageSendResult.T3Timeout(systemByte);
             }
             catch (SecsException ex)
             {
-                _logger.Error($"SECS error: {ex.Message}");
-                return MessageSendResult.Error(ex.Message);
+                return HandleSecsException(ex, message, systemByte);
             }
             catch (Exception ex)
             {
                 _logger.Error($"Send failed: {ex.Message}");
                 return MessageSendResult.Error(ex.Message);
             }
+            finally
+            {
+                secsMsg?.Dispose();
+            }
         }
 
-        public Task ReplyAsync(SecsMessageData primaryMessage, SecsMessageData replyMessage)
+        private MessageSendResult HandleSecsException(SecsException ex, SecsMessageData message, uint systemByte)
+        {
+            var errorMsg = ex.SecsMessage;
+            try
+            {
+                if (errorMsg != null)
+                {
+                    var errorData = SecsMessageConverter.FromSecs4Net(errorMsg, systemByte);
+                    LogMessage(errorData, MessageDirection.Received);
+
+                    if (errorMsg.F == 0)
+                    {
+                        _logger.Warn($"Abort via exception: {errorData.ToHeaderString()}");
+                        return MessageSendResult.Abort(errorData);
+                    }
+
+                    if (errorMsg.S == 9)
+                    {
+                        _logger.Warn($"S9 error via exception: {errorData.ToHeaderString()}");
+                        UnexpectedMessageReceived?.Invoke(this, errorData);
+                        return MessageSendResult.Error($"S9 error: {errorData.ToHeaderString()}");
+                    }
+                }
+
+                if (ex.Message != null && ex.Message.IndexOf("T3", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    _logger.Warn($"T3 timeout: SystemByte={systemByte}, S{message.Stream}F{message.Function}");
+                    return MessageSendResult.T3Timeout(systemByte);
+                }
+
+                _logger.Error($"SECS error: {ex.Message}");
+                return MessageSendResult.Error(ex.Message);
+            }
+            finally
+            {
+                errorMsg?.Dispose();
+            }
+        }
+
+        public async Task ReplyAsync(SecsMessageData primaryMessage, SecsMessageData replyMessage)
         {
             if (primaryMessage == null)
                 throw new ArgumentNullException(nameof(primaryMessage));
@@ -328,17 +392,42 @@ namespace HostSimulator.Protocol
             if (State != ProtocolConnectionState.Selected)
                 throw new InvalidOperationException("Not in Selected state.");
 
-            var secsReply = SecsMessageConverter.ToSecs4Net(replyMessage);
-            LogMessage(replyMessage, MessageDirection.Sent);
-            _logger.Info($"Reply sent: {replyMessage.ToHeaderString()}");
+            PrimaryMessageContext context;
+            if (!_pendingPrimaries.TryRemove(primaryMessage.SystemByte, out context))
+            {
+                _logger.Warn($"No pending primary for SystemByte={primaryMessage.SystemByte}, sending without wrapper");
+                LogMessage(replyMessage, MessageDirection.Sent);
+                return;
+            }
 
-            return Task.CompletedTask;
+            SecsMessage secsReply = null;
+            try
+            {
+                secsReply = SecsMessageConverter.ToSecs4Net(replyMessage);
+                var sent = await context.TryReplyAsync(secsReply).ConfigureAwait(false);
+
+                var rawBytes = SecsMessageConverter.EncodeRawBytes(secsReply, primaryMessage.SystemByte);
+                var replyWithRaw = new SecsMessageData(
+                    replyMessage.Stream, replyMessage.Function, replyMessage.WBit,
+                    primaryMessage.SystemByte, replyMessage.Item, rawBytes);
+                LogMessage(replyWithRaw, MessageDirection.Sent);
+
+                if (sent)
+                    _logger.Info($"Reply sent: {replyWithRaw.ToHeaderString()}");
+                else
+                    _logger.Warn($"Reply failed (already replied or expired): {replyWithRaw.ToHeaderString()}");
+            }
+            finally
+            {
+                secsReply?.Dispose();
+                context.Dispose();
+            }
         }
 
         public void Dispose()
         {
             HsmsConnection conn;
-            SecsGem gem;
+            ISecsGem gem;
             CancellationTokenSource lifetimeCts;
 
             lock (_lock)
@@ -359,8 +448,10 @@ namespace HostSimulator.Protocol
                 lifetimeCts.Dispose();
             }
 
-            if (gem != null)
-                gem.Dispose();
+            DisposePendingPrimaries();
+
+            if (gem is IDisposable disposableGem)
+                disposableGem.Dispose();
 
             if (conn != null)
             {
@@ -371,10 +462,22 @@ namespace HostSimulator.Protocol
             _stateMachine.ForceState(ProtocolConnectionState.Disconnected, StateChangeReason.Disposed);
         }
 
+        private void DisposePendingPrimaries()
+        {
+            foreach (var kvp in _pendingPrimaries)
+            {
+                if (_pendingPrimaries.TryRemove(kvp.Key, out var ctx))
+                {
+                    try { ctx.Dispose(); }
+                    catch { }
+                }
+            }
+        }
+
         private async Task CleanupConnectionAsync()
         {
             HsmsConnection conn;
-            SecsGem gem;
+            ISecsGem gem;
             CancellationTokenSource lifetimeCts;
             Task receiveTask;
 
@@ -402,8 +505,10 @@ namespace HostSimulator.Protocol
                 catch { }
             }
 
-            if (gem != null)
-                gem.Dispose();
+            DisposePendingPrimaries();
+
+            if (gem is IDisposable disposableGem)
+                disposableGem.Dispose();
 
             if (conn != null)
             {
@@ -423,6 +528,7 @@ namespace HostSimulator.Protocol
                 {
                     _lifetimeCts?.Cancel();
                 }
+                DisposePendingPrimaries();
                 _stateMachine.ForceState(ProtocolConnectionState.Disconnected, reason);
                 return;
             }
@@ -468,15 +574,15 @@ namespace HostSimulator.Protocol
                     while (await enumerator.MoveNextAsync().ConfigureAwait(false))
                     {
                         var wrapper = enumerator.Current;
+                        var stored = false;
                         try
                         {
-                            HandlePrimaryMessage(wrapper);
+                            stored = HandlePrimaryMessage(wrapper);
                         }
                         finally
                         {
-                            // PrimaryMessageWrapper does not implement IDisposable;
-                            // SecsMessage (PrimaryMessage) does — dispose it.
-                            wrapper.PrimaryMessage?.Dispose();
+                            if (!stored)
+                                wrapper.PrimaryMessage?.Dispose();
                         }
                     }
                 }
@@ -492,12 +598,21 @@ namespace HostSimulator.Protocol
             }
         }
 
-        private void HandlePrimaryMessage(PrimaryMessageWrapper wrapper)
+        private bool HandlePrimaryMessage(PrimaryMessageWrapper wrapper)
+        {
+            return HandlePrimaryMessageCore(
+                wrapper.PrimaryMessage,
+                unchecked((uint)wrapper.Id),
+                (reply, ct) => wrapper.TryReplyAsync(reply, ct));
+        }
+
+        internal bool HandlePrimaryMessageCore(
+            SecsMessage msg,
+            uint systemByte,
+            Func<SecsMessage, CancellationToken, Task<bool>> tryReplyAsync)
         {
             try
             {
-                var msg = wrapper.PrimaryMessage;
-                var systemByte = _systemByteGenerator.Next();
                 var data = SecsMessageConverter.FromSecs4Net(msg, systemByte);
                 LogMessage(data, MessageDirection.Received);
                 _logger.Info($"Primary received: {data.ToHeaderString()}");
@@ -506,21 +621,29 @@ namespace HostSimulator.Protocol
                 {
                     _logger.Warn($"S9 error message received: {data.ToHeaderString()}");
                     UnexpectedMessageReceived?.Invoke(this, data);
-                    return;
+                    return false;
                 }
 
                 if (msg.F == 0)
                 {
                     _logger.Warn($"SxF0 abort message received: {data.ToHeaderString()}");
                     UnexpectedMessageReceived?.Invoke(this, data);
-                    return;
+                    return false;
+                }
+
+                if (msg.ReplyExpected)
+                {
+                    var context = new PrimaryMessageContext(systemByte, msg, tryReplyAsync);
+                    _pendingPrimaries[systemByte] = context;
                 }
 
                 PrimaryMessageReceived?.Invoke(this, new PrimaryMessageReceivedEventArgs(data));
+                return msg.ReplyExpected;
             }
             catch (Exception ex)
             {
                 _logger.Error($"Error handling primary message: {ex.Message}");
+                return false;
             }
         }
 
