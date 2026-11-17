@@ -81,7 +81,7 @@ namespace HostSimulator.Poc
             Console.WriteLine("Cycles : " + cycles + ", Timeout: " + timeoutSec + "s, Delay: " + delaySec + "s between cycles");
             Console.WriteLine();
 
-            using (var adapter = new Secs4NetAdapter(logger))
+            using (var adapter = new Secs4NetAdapter(logger, new MessageFileLogger("logs")))
             {
                 var service = new ConnectionTestService();
                 var result = await service.RunConnectDisconnectCyclesAsync(
