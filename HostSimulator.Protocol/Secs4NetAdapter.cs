@@ -25,6 +25,8 @@ namespace HostSimulator.Protocol
         private int _t3TimeoutMs = 45000;
         private Timer _expiryTimer;
 
+        internal Secs4NetLoggerBridge SecsLoggerBridge => _secsLoggerBridge;
+
         public ProtocolConnectionState State => _stateMachine.CurrentState;
 
         public event EventHandler<StateChangedEventArgs> StateChanged
@@ -285,6 +287,8 @@ namespace HostSimulator.Protocol
                 secsMsg = SecsMessageConverter.ToSecs4Net(message);
                 _secsLoggerBridge.TrackOutbound(secsMsg);
 
+                var sendTimestamp = DateTimeOffset.Now;
+
                 SecsMessage reply = null;
                 SecsException secsError = null;
                 try
@@ -296,14 +300,19 @@ namespace HostSimulator.Protocol
                     secsError = ex;
                 }
 
-                uint systemByte = 0;
-                if (_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
-                    systemByte = unchecked((uint)wireId);
+                if (!_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
+                {
+                    _logger.Error("Wire System Byte not captured — MessageOut was not called for this message");
+                    if (secsError != null)
+                        return MessageSendResult.Error("Send failed: " + secsError.Message);
+                    return MessageSendResult.Error("Wire System Byte not captured");
+                }
+                uint systemByte = unchecked((uint)wireId);
 
                 var rawBytes = SecsMessageConverter.EncodeRawBytes(secsMsg, systemByte, deviceId);
                 var outgoing = new SecsMessageData(
                     message.Stream, message.Function, message.WBit, systemByte,
-                    message.Item, rawBytes);
+                    message.Item, rawBytes, sendTimestamp);
                 LogMessage(outgoing, MessageDirection.Sent);
                 _logger.Info($"Send: {outgoing.ToHeaderString()}");
 

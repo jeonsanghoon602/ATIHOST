@@ -28,10 +28,14 @@ namespace HostSimulator.Tests
         private class FakeSecsGem : ISecsGem
         {
             public ushort DeviceId { get; set; }
+            public int WireId { get; set; } = 42;
+            public Secs4NetLoggerBridge Bridge { get; set; }
             public Func<SecsMessage, CancellationToken, Task<SecsMessage>> OnSendAsync { get; set; }
 
             public Task<SecsMessage> SendAsync(SecsMessage message, CancellationToken cancellationToken = default)
             {
+                Bridge?.MessageOut(message, WireId);
+
                 if (OnSendAsync != null)
                     return OnSendAsync(message, cancellationToken);
                 return Task.FromResult<SecsMessage>(null);
@@ -61,11 +65,13 @@ namespace HostSimulator.Tests
         private Secs4NetAdapter CreateAdapter(FakeSecsGem gem, StubLogger logger = null,
             StubMessageLogger msgLogger = null)
         {
-            return new Secs4NetAdapter(
+            var adapter = new Secs4NetAdapter(
                 logger ?? new StubLogger(),
                 msgLogger,
                 gem,
                 ProtocolConnectionState.Selected);
+            gem.Bridge = adapter.SecsLoggerBridge;
+            return adapter;
         }
 
         #region SendAsync tests
@@ -237,6 +243,7 @@ namespace HostSimulator.Tests
         {
             var gem = new FakeSecsGem
             {
+                WireId = 0x1234,
                 OnSendAsync = (msg, ct) => throw new SecsException("T3 timeout expired")
             };
             var msgLogger = new StubMessageLogger();
@@ -249,6 +256,69 @@ namespace HostSimulator.Tests
             Assert.True(msgLogger.Entries.Count >= 1,
                 "Sent log entry should be written even on T3 timeout");
             Assert.Equal(MessageDirection.Sent, msgLogger.Entries[0].Direction);
+        }
+
+        [Fact]
+        public async Task SendAsync_CapturesWireIdFromBridge()
+        {
+            var gem = new FakeSecsGem
+            {
+                WireId = 0xABCD,
+                OnSendAsync = (msg, ct) =>
+                    Task.FromResult(new SecsMessage(msg.S, (byte)(msg.F + 1), false))
+            };
+            var msgLogger = new StubMessageLogger();
+            var adapter = CreateAdapter(gem, msgLogger: msgLogger);
+
+            var message = new SecsMessageData(1, 13, true, 0, null);
+            var result = await adapter.SendAsync(message);
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(0xABCDu, result.Reply.SystemByte);
+            var sentEntry = msgLogger.Entries[0];
+            Assert.Equal(MessageDirection.Sent, sentEntry.Direction);
+            Assert.Contains("SysByte=43981", sentEntry.Header);
+        }
+
+        [Fact]
+        public async Task SendAsync_MissedWireId_ReturnsError()
+        {
+            var gem = new FakeSecsGem
+            {
+                OnSendAsync = (msg, ct) =>
+                    Task.FromResult(new SecsMessage(msg.S, (byte)(msg.F + 1), false))
+            };
+            var adapter = CreateAdapter(gem);
+            gem.Bridge = null;
+
+            var message = new SecsMessageData(1, 13, true, 0, null);
+            var result = await adapter.SendAsync(message);
+
+            Assert.False(result.IsSuccess);
+            Assert.Contains("Wire System Byte not captured", result.ErrorMessage);
+        }
+
+        [Fact]
+        public async Task SendAsync_TimestampCapturedBeforeAwait()
+        {
+            var before = DateTimeOffset.Now;
+            var gem = new FakeSecsGem
+            {
+                OnSendAsync = async (msg, ct) =>
+                {
+                    await Task.Delay(100, ct);
+                    return new SecsMessage(msg.S, (byte)(msg.F + 1), false);
+                }
+            };
+            var msgLogger = new StubMessageLogger();
+            var adapter = CreateAdapter(gem, msgLogger: msgLogger);
+
+            var message = new SecsMessageData(1, 13, true, 0, null);
+            await adapter.SendAsync(message);
+
+            var sentEntry = msgLogger.Entries[0];
+            Assert.True(sentEntry.Timestamp >= before);
+            Assert.True(sentEntry.Timestamp <= before.AddMilliseconds(100));
         }
 
         #endregion
@@ -606,6 +676,48 @@ namespace HostSimulator.Tests
             Assert.True(sentEntry.RawBytes.Length >= 10);
             Assert.Equal(0x00, sentEntry.RawBytes[0]);
             Assert.Equal(0x07, sentEntry.RawBytes[1]);
+        }
+
+        #endregion
+
+        #region Bridge lifetime tests
+
+        [Fact]
+        public void Bridge_UntrackedMessage_NotCached()
+        {
+            var bridge = new Secs4NetLoggerBridge(new StubLogger());
+            var msg = new SecsMessage(1, 1, true);
+
+            bridge.MessageOut(msg, 99);
+
+            Assert.False(bridge.TryGetOutboundId(msg, out _));
+        }
+
+        [Fact]
+        public void Bridge_TrackedMessage_CapturedAndRemoved()
+        {
+            var bridge = new Secs4NetLoggerBridge(new StubLogger());
+            var msg = new SecsMessage(1, 1, true);
+
+            bridge.TrackOutbound(msg);
+            bridge.MessageOut(msg, 123);
+
+            Assert.True(bridge.TryGetOutboundId(msg, out var id));
+            Assert.Equal(123, id);
+            Assert.False(bridge.TryGetOutboundId(msg, out _));
+        }
+
+        [Fact]
+        public void Bridge_UntrackOutbound_CleansUpBothDictionaries()
+        {
+            var bridge = new Secs4NetLoggerBridge(new StubLogger());
+            var msg = new SecsMessage(1, 1, true);
+
+            bridge.TrackOutbound(msg);
+            bridge.MessageOut(msg, 456);
+            bridge.UntrackOutbound(msg);
+
+            Assert.False(bridge.TryGetOutboundId(msg, out _));
         }
 
         #endregion
