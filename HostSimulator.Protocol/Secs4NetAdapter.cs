@@ -10,7 +10,7 @@ namespace HostSimulator.Protocol
 {
     public sealed class Secs4NetAdapter : IProtocolAdapter
     {
-        private readonly ISecsGemLogger _secsLogger;
+        private readonly Secs4NetLoggerBridge _secsLoggerBridge;
         private readonly Domain.ILogger _logger;
         private readonly IMessageLogger _messageLogger;
         private readonly HsmsStateMachine _stateMachine;
@@ -23,6 +23,8 @@ namespace HostSimulator.Protocol
         private Task _receiveTask;
         private readonly object _lock = new object();
         private bool _disposed;
+        private int _t3TimeoutMs = 45000;
+        private Timer _expiryTimer;
 
         public ProtocolConnectionState State => _stateMachine.CurrentState;
 
@@ -39,8 +41,9 @@ namespace HostSimulator.Protocol
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _messageLogger = messageLogger;
-            _secsLogger = new Secs4NetLoggerBridge(logger);
+            _secsLoggerBridge = new Secs4NetLoggerBridge(logger);
             _stateMachine = new HsmsStateMachine(logger);
+            _expiryTimer = new Timer(CleanupExpiredPrimaries, null, 10000, 10000);
         }
 
         internal Secs4NetAdapter(Domain.ILogger logger, IMessageLogger messageLogger,
@@ -48,11 +51,12 @@ namespace HostSimulator.Protocol
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _messageLogger = messageLogger;
-            _secsLogger = new Secs4NetLoggerBridge(logger);
+            _secsLoggerBridge = new Secs4NetLoggerBridge(logger);
             _stateMachine = new HsmsStateMachine(logger);
             _secsGem = testGem;
             if (initialState != ProtocolConnectionState.Disconnected)
                 _stateMachine.ForceState(initialState, StateChangeReason.SelectCompleted);
+            _expiryTimer = new Timer(CleanupExpiredPrimaries, null, 10000, 10000);
         }
 
         public async Task ConnectAsync(
@@ -94,8 +98,9 @@ namespace HostSimulator.Protocol
                 });
 
                 lifetimeCts = new CancellationTokenSource();
-                conn = new HsmsConnection(options, _secsLogger);
-                gem = new SecsGem(options, conn, _secsLogger);
+                _t3TimeoutMs = parameters.T3Seconds * 1000;
+                conn = new HsmsConnection(options, _secsLoggerBridge);
+                gem = new SecsGem(options, conn, _secsLoggerBridge);
                 conn.ConnectionChanged += OnConnectionChanged;
                 _connection = conn;
                 _secsGem = gem;
@@ -274,23 +279,30 @@ namespace HostSimulator.Protocol
             if (gem == null || State != ProtocolConnectionState.Selected)
                 return MessageSendResult.NotConnected();
 
-            var systemByte = _systemByteGenerator.Next();
+            var deviceId = gem.DeviceId;
             SecsMessage secsMsg = null;
             try
             {
                 secsMsg = SecsMessageConverter.ToSecs4Net(message);
-                var rawBytes = SecsMessageConverter.EncodeRawBytes(secsMsg, systemByte);
-                var outgoing = new SecsMessageData(
-                    message.Stream, message.Function, message.WBit, systemByte,
-                    message.Item, rawBytes);
-
-                LogMessage(outgoing, MessageDirection.Sent);
-                _logger.Info($"Send: {outgoing.ToHeaderString()}");
 
                 SecsMessage reply = null;
                 try
                 {
                     reply = await gem.SendAsync(secsMsg, cancellationToken).ConfigureAwait(false);
+
+                    uint systemByte;
+                    if (_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
+                        systemByte = unchecked((uint)wireId);
+                    else
+                        systemByte = _systemByteGenerator.Next();
+
+                    var rawBytes = SecsMessageConverter.EncodeRawBytes(secsMsg, systemByte, deviceId);
+                    var outgoing = new SecsMessageData(
+                        message.Stream, message.Function, message.WBit, systemByte,
+                        message.Item, rawBytes);
+
+                    LogMessage(outgoing, MessageDirection.Sent);
+                    _logger.Info($"Send: {outgoing.ToHeaderString()}");
 
                     if (reply == null)
                     {
@@ -299,7 +311,7 @@ namespace HostSimulator.Protocol
                         return MessageSendResult.Error("No reply received");
                     }
 
-                    var replyData = SecsMessageConverter.FromSecs4Net(reply, systemByte);
+                    var replyData = SecsMessageConverter.FromSecs4Net(reply, systemByte, deviceId);
                     LogMessage(replyData, MessageDirection.Received);
 
                     if (reply.F == 0)
@@ -324,7 +336,12 @@ namespace HostSimulator.Protocol
             }
             catch (SecsException ex)
             {
-                return HandleSecsException(ex, message, systemByte);
+                uint systemByte;
+                if (_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
+                    systemByte = unchecked((uint)wireId);
+                else
+                    systemByte = _systemByteGenerator.Next();
+                return HandleSecsException(ex, message, systemByte, deviceId);
             }
             catch (Exception ex)
             {
@@ -337,14 +354,14 @@ namespace HostSimulator.Protocol
             }
         }
 
-        private MessageSendResult HandleSecsException(SecsException ex, SecsMessageData message, uint systemByte)
+        private MessageSendResult HandleSecsException(SecsException ex, SecsMessageData message, uint systemByte, ushort deviceId)
         {
             var errorMsg = ex.SecsMessage;
             try
             {
                 if (errorMsg != null)
                 {
-                    var errorData = SecsMessageConverter.FromSecs4Net(errorMsg, systemByte);
+                    var errorData = SecsMessageConverter.FromSecs4Net(errorMsg, systemByte, deviceId);
                     LogMessage(errorData, MessageDirection.Received);
 
                     if (errorMsg.F == 0)
@@ -395,27 +412,32 @@ namespace HostSimulator.Protocol
             PrimaryMessageContext context;
             if (!_pendingPrimaries.TryRemove(primaryMessage.SystemByte, out context))
             {
-                _logger.Warn($"No pending primary for SystemByte={primaryMessage.SystemByte}, sending without wrapper");
-                LogMessage(replyMessage, MessageDirection.Sent);
-                return;
+                throw new InvalidOperationException(
+                    $"No pending primary for SystemByte={primaryMessage.SystemByte}. " +
+                    "The message may have expired (T3) or already been replied to.");
             }
 
+            var deviceId = _secsGem?.DeviceId ?? 0;
             SecsMessage secsReply = null;
             try
             {
                 secsReply = SecsMessageConverter.ToSecs4Net(replyMessage);
                 var sent = await context.TryReplyAsync(secsReply).ConfigureAwait(false);
 
-                var rawBytes = SecsMessageConverter.EncodeRawBytes(secsReply, primaryMessage.SystemByte);
+                var rawBytes = SecsMessageConverter.EncodeRawBytes(secsReply, primaryMessage.SystemByte, deviceId);
                 var replyWithRaw = new SecsMessageData(
                     replyMessage.Stream, replyMessage.Function, replyMessage.WBit,
                     primaryMessage.SystemByte, replyMessage.Item, rawBytes);
-                LogMessage(replyWithRaw, MessageDirection.Sent);
 
                 if (sent)
+                {
+                    LogMessage(replyWithRaw, MessageDirection.Sent);
                     _logger.Info($"Reply sent: {replyWithRaw.ToHeaderString()}");
+                }
                 else
+                {
                     _logger.Warn($"Reply failed (already replied or expired): {replyWithRaw.ToHeaderString()}");
+                }
             }
             finally
             {
@@ -441,6 +463,9 @@ namespace HostSimulator.Protocol
                 lifetimeCts = _lifetimeCts;
                 _lifetimeCts = null;
             }
+
+            _expiryTimer?.Dispose();
+            _expiryTimer = null;
 
             if (lifetimeCts != null)
             {
@@ -470,6 +495,24 @@ namespace HostSimulator.Protocol
                 {
                     try { ctx.Dispose(); }
                     catch { }
+                }
+            }
+        }
+
+        private void CleanupExpiredPrimaries(object state)
+        {
+            var now = DateTime.UtcNow;
+            var timeout = TimeSpan.FromMilliseconds(_t3TimeoutMs);
+            foreach (var kvp in _pendingPrimaries)
+            {
+                if (now - kvp.Value.CreatedUtc > timeout)
+                {
+                    if (_pendingPrimaries.TryRemove(kvp.Key, out var ctx))
+                    {
+                        _logger.Warn($"T3 expired for pending primary SystemByte={kvp.Key}");
+                        try { ctx.Dispose(); }
+                        catch { }
+                    }
                 }
             }
         }
@@ -613,7 +656,8 @@ namespace HostSimulator.Protocol
         {
             try
             {
-                var data = SecsMessageConverter.FromSecs4Net(msg, systemByte);
+                var deviceId = _secsGem?.DeviceId ?? 0;
+                var data = SecsMessageConverter.FromSecs4Net(msg, systemByte, deviceId);
                 LogMessage(data, MessageDirection.Received);
                 _logger.Info($"Primary received: {data.ToHeaderString()}");
 

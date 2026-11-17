@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using Secs4Net;
 using DomainLogger = HostSimulator.Domain.ILogger;
 
@@ -7,6 +8,8 @@ namespace HostSimulator.Protocol
     internal sealed class Secs4NetLoggerBridge : ISecsGemLogger
     {
         private readonly DomainLogger _logger;
+        private readonly ConcurrentDictionary<SecsMessage, int> _outboundIds
+            = new ConcurrentDictionary<SecsMessage, int>();
 
         public Secs4NetLoggerBridge(DomainLogger logger)
         {
@@ -36,6 +39,18 @@ namespace HostSimulator.Protocol
             => _logger.Info("SECS IN [" + id + "]: " + msg);
 
         public void MessageOut(SecsMessage msg, int id)
-            => _logger.Info("SECS OUT [" + id + "]: " + msg);
+        {
+            _logger.Info("SECS OUT [" + id + "]: " + msg);
+            if (msg != null)
+                _outboundIds[msg] = id;
+        }
+
+        public bool TryGetOutboundId(SecsMessage msg, out int id)
+        {
+            if (msg != null && _outboundIds.TryRemove(msg, out id))
+                return true;
+            id = 0;
+            return false;
+        }
     }
 }

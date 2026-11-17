@@ -27,7 +27,7 @@ namespace HostSimulator.Tests
 
         private class FakeSecsGem : ISecsGem
         {
-            public ushort DeviceId => 0;
+            public ushort DeviceId { get; set; }
             public Func<SecsMessage, CancellationToken, Task<SecsMessage>> OnSendAsync { get; set; }
 
             public Task<SecsMessage> SendAsync(SecsMessage message, CancellationToken cancellationToken = default)
@@ -232,6 +232,24 @@ namespace HostSimulator.Tests
             Assert.True(sentEntry.RawBytes.Length >= 10, "Raw bytes should include 10-byte SECS-II header");
         }
 
+        [Fact]
+        public async Task SendAsync_FallbackSystemByte_WhenLoggerMisses()
+        {
+            var gem = new FakeSecsGem
+            {
+                OnSendAsync = (msg, ct) =>
+                    Task.FromResult(new SecsMessage(msg.S, (byte)(msg.F + 1), false))
+            };
+            var msgLogger = new StubMessageLogger();
+            var adapter = CreateAdapter(gem, msgLogger: msgLogger);
+
+            var message = new SecsMessageData(1, 13, true, 0, null);
+            var result = await adapter.SendAsync(message);
+
+            Assert.True(result.IsSuccess);
+            Assert.True(msgLogger.Entries.Count >= 1);
+        }
+
         #endregion
 
         #region HandlePrimaryMessage tests
@@ -361,17 +379,55 @@ namespace HostSimulator.Tests
         }
 
         [Fact]
-        public async Task ReplyAsync_NoStoredContext_LogsWarning()
+        public async Task ReplyAsync_NoStoredContext_ThrowsInvalidOperation()
         {
             var gem = new FakeSecsGem();
-            var logger = new StubLogger();
-            var adapter = CreateAdapter(gem, logger);
+            var adapter = CreateAdapter(gem);
 
             var primary = new SecsMessageData(1, 1, true, 999u, null);
             var replyData = new SecsMessageData(1, 2, false, 999u, null);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => adapter.ReplyAsync(primary, replyData));
+        }
+
+        [Fact]
+        public async Task ReplyAsync_FailedTryReply_DoesNotLogSent()
+        {
+            var gem = new FakeSecsGem();
+            var msgLogger = new StubMessageLogger();
+            var adapter = CreateAdapter(gem, msgLogger: msgLogger);
+
+            var msg = new SecsMessage(1, 1, true);
+            adapter.HandlePrimaryMessageCore(
+                msg, 888u,
+                (reply, ct) => Task.FromResult(false));
+
+            var entriesBefore = msgLogger.Entries.Count;
+            var primary = new SecsMessageData(1, 1, true, 888u, null);
+            var replyData = new SecsMessageData(1, 2, false, 888u, SecsItemData.U1(0));
             await adapter.ReplyAsync(primary, replyData);
 
-            Assert.Contains(logger.Messages, m => m.Contains("No pending primary"));
+            for (var i = entriesBefore; i < msgLogger.Entries.Count; i++)
+                Assert.NotEqual(MessageDirection.Sent, msgLogger.Entries[i].Direction);
+        }
+
+        [Fact]
+        public async Task ReplyAsync_DoubleReply_ThrowsInvalidOperation()
+        {
+            var gem = new FakeSecsGem();
+            var adapter = CreateAdapter(gem);
+
+            var msg = new SecsMessage(1, 1, true);
+            adapter.HandlePrimaryMessageCore(
+                msg, 1234u, (reply, ct) => Task.FromResult(true));
+
+            var primary = new SecsMessageData(1, 1, true, 1234u, null);
+            var replyData = new SecsMessageData(1, 2, false, 1234u, null);
+            await adapter.ReplyAsync(primary, replyData);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => adapter.ReplyAsync(primary, new SecsMessageData(1, 2, false, 1234u, null)));
         }
 
         [Fact]
@@ -424,9 +480,32 @@ namespace HostSimulator.Tests
             Assert.Equal(2, rawBytes[3]); // Function
         }
 
+        [Fact]
+        public void EncodeRawBytes_NonZeroDeviceId_AppearsInHeader()
+        {
+            var msg = new SecsMessage(1, 1, true);
+            ushort deviceId = 5;
+            var rawBytes = SecsMessageConverter.EncodeRawBytes(msg, 100u, deviceId);
+
+            Assert.Equal(10, rawBytes.Length);
+            Assert.Equal(0x00, rawBytes[0]);
+            Assert.Equal(0x05, rawBytes[1]);
+        }
+
+        [Fact]
+        public void EncodeRawBytes_LargeDeviceId_MaskedCorrectly()
+        {
+            var msg = new SecsMessage(1, 1, false);
+            ushort deviceId = 0x7FFF;
+            var rawBytes = SecsMessageConverter.EncodeRawBytes(msg, 0u, deviceId);
+
+            Assert.Equal(0x7F, rawBytes[0]);
+            Assert.Equal(0xFF, rawBytes[1]);
+        }
+
         #endregion
 
-        #region JIS8 round-trip test
+        #region JIS8 round-trip tests
 
         [Fact]
         public void ConvertItemToSecs4Net_Jis8_UsesItemJ()
@@ -437,6 +516,77 @@ namespace HostSimulator.Tests
 
             Assert.NotNull(secs4net.SecsItem);
             Assert.Equal(SecsFormat.JIS8, secs4net.SecsItem.Format);
+        }
+
+        [Fact]
+        public void Jis8_RoundTrip_ValuePreserved()
+        {
+            var original = "テスト文字列";
+            var jisData = SecsItemData.Create(SecsDataFormat.Jis8, original);
+            var secsMsg = new SecsMessageData(10, 1, true, 0, jisData);
+            var secs4net = SecsMessageConverter.ToSecs4Net(secsMsg);
+
+            var roundTripped = SecsMessageConverter.ConvertItemFromSecs4Net(secs4net.SecsItem);
+            Assert.Equal(SecsDataFormat.Jis8, roundTripped.Format);
+            Assert.Equal(original, (string)roundTripped.Value);
+        }
+
+        #endregion
+
+        #region Logger composition tests
+
+        [Fact]
+        public void Adapter_WithMessageLogger_LogsOnPrimaryReceived()
+        {
+            var gem = new FakeSecsGem();
+            var msgLogger = new StubMessageLogger();
+            var adapter = CreateAdapter(gem, msgLogger: msgLogger);
+
+            adapter.PrimaryMessageReceived += (s, e) => { };
+
+            var msg = new SecsMessage(6, 11, true) { SecsItem = Item.L() };
+            adapter.HandlePrimaryMessageCore(msg, 42u, (reply, ct) => Task.FromResult(true));
+
+            Assert.True(msgLogger.Entries.Count >= 1);
+            var entry = msgLogger.Entries[0];
+            Assert.Equal(MessageDirection.Received, entry.Direction);
+            Assert.NotNull(entry.RawBytes);
+        }
+
+        [Fact]
+        public void Adapter_WithoutMessageLogger_DoesNotThrow()
+        {
+            var gem = new FakeSecsGem();
+            var adapter = new Secs4NetAdapter(
+                new StubLogger(), null, gem, ProtocolConnectionState.Selected);
+
+            adapter.PrimaryMessageReceived += (s, e) => { };
+
+            var msg = new SecsMessage(6, 11, true) { SecsItem = Item.L() };
+            adapter.HandlePrimaryMessageCore(msg, 42u, (reply, ct) => Task.FromResult(true));
+        }
+
+        [Fact]
+        public async Task SendAsync_WithNonZeroDeviceId_RawBytesContainDeviceId()
+        {
+            var gem = new FakeSecsGem
+            {
+                DeviceId = 7,
+                OnSendAsync = (msg, ct) =>
+                    Task.FromResult(new SecsMessage(msg.S, (byte)(msg.F + 1), false))
+            };
+            var msgLogger = new StubMessageLogger();
+            var adapter = CreateAdapter(gem, msgLogger: msgLogger);
+
+            var message = new SecsMessageData(1, 13, true, 0, null);
+            await adapter.SendAsync(message);
+
+            Assert.True(msgLogger.Entries.Count >= 1);
+            var sentEntry = msgLogger.Entries[0];
+            Assert.Equal(MessageDirection.Sent, sentEntry.Direction);
+            Assert.True(sentEntry.RawBytes.Length >= 10);
+            Assert.Equal(0x00, sentEntry.RawBytes[0]);
+            Assert.Equal(0x07, sentEntry.RawBytes[1]);
         }
 
         #endregion

@@ -9,6 +9,7 @@ namespace HostSimulator.Protocol
     {
         public uint SystemByte { get; }
         public SecsMessage Message { get; }
+        public DateTime CreatedUtc { get; }
         private readonly Func<SecsMessage, CancellationToken, Task<bool>> _tryReplyAsync;
         private int _completed;
 
@@ -18,6 +19,7 @@ namespace HostSimulator.Protocol
             SystemByte = systemByte;
             Message = message ?? throw new ArgumentNullException(nameof(message));
             _tryReplyAsync = tryReplyAsync ?? throw new ArgumentNullException(nameof(tryReplyAsync));
+            CreatedUtc = DateTime.UtcNow;
         }
 
         public async Task<bool> TryReplyAsync(SecsMessage reply, CancellationToken cancellationToken = default)
