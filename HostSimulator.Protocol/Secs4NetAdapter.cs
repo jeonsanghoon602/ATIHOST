@@ -22,6 +22,7 @@ namespace HostSimulator.Protocol
         private Task _receiveTask;
         private readonly object _lock = new object();
         private bool _disposed;
+        internal int T3TimeoutMs { get => _t3TimeoutMs; set => _t3TimeoutMs = value; }
         private int _t3TimeoutMs = 45000;
         private Timer _expiryTimer;
 
@@ -303,6 +304,8 @@ namespace HostSimulator.Protocol
                 if (!_secsLoggerBridge.TryGetOutboundId(secsMsg, out var wireId))
                 {
                     _logger.Error("Wire System Byte not captured — MessageOut was not called for this message");
+                    reply?.Dispose();
+                    secsError?.SecsMessage?.Dispose();
                     if (secsError != null)
                         return MessageSendResult.Error("Send failed: " + secsError.Message);
                     return MessageSendResult.Error("Wire System Byte not captured");
@@ -509,7 +512,7 @@ namespace HostSimulator.Protocol
             }
         }
 
-        private void CleanupExpiredPrimaries(object state)
+        internal void CleanupExpiredPrimaries(object state)
         {
             var now = DateTime.UtcNow;
             var timeout = TimeSpan.FromMilliseconds(_t3TimeoutMs);

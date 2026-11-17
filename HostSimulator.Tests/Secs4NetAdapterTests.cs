@@ -301,24 +301,27 @@ namespace HostSimulator.Tests
         [Fact]
         public async Task SendAsync_TimestampCapturedBeforeAwait()
         {
+            var tcs = new TaskCompletionSource<SecsMessage>();
             var before = DateTimeOffset.Now;
             var gem = new FakeSecsGem
             {
-                OnSendAsync = async (msg, ct) =>
-                {
-                    await Task.Delay(100, ct);
-                    return new SecsMessage(msg.S, (byte)(msg.F + 1), false);
-                }
+                OnSendAsync = (msg, ct) => tcs.Task
             };
             var msgLogger = new StubMessageLogger();
             var adapter = CreateAdapter(gem, msgLogger: msgLogger);
 
             var message = new SecsMessageData(1, 13, true, 0, null);
-            await adapter.SendAsync(message);
+            var sendTask = adapter.SendAsync(message);
+
+            await Task.Delay(200);
+            var afterDelay = DateTimeOffset.Now;
+            tcs.SetResult(new SecsMessage(1, 14, false));
+            await sendTask;
 
             var sentEntry = msgLogger.Entries[0];
             Assert.True(sentEntry.Timestamp >= before);
-            Assert.True(sentEntry.Timestamp <= before.AddMilliseconds(100));
+            Assert.True(sentEntry.Timestamp < afterDelay,
+                "Sent timestamp should reflect send time, not reply completion time");
         }
 
         #endregion
@@ -718,6 +721,30 @@ namespace HostSimulator.Tests
             bridge.UntrackOutbound(msg);
 
             Assert.False(bridge.TryGetOutboundId(msg, out _));
+        }
+
+        [Fact]
+        public void CleanupExpiredPrimaries_DisposesExpiredContext()
+        {
+            var gem = new FakeSecsGem();
+            var logger = new StubLogger();
+            var adapter = CreateAdapter(gem, logger: logger);
+            adapter.T3TimeoutMs = 1;
+
+            var msg = new SecsMessage(1, 1, true);
+            adapter.HandlePrimaryMessageCore(
+                msg, 777u, (reply, ct) => Task.FromResult(true));
+
+            System.Threading.Thread.Sleep(50);
+            adapter.CleanupExpiredPrimaries(null);
+
+            Assert.Contains(logger.Messages,
+                m => m.Contains("T3 expired") && m.Contains("777"));
+
+            var primary = new SecsMessageData(1, 1, true, 777u, null);
+            var replyData = new SecsMessageData(1, 2, false, 777u, null);
+            Assert.ThrowsAsync<InvalidOperationException>(
+                () => adapter.ReplyAsync(primary, replyData)).GetAwaiter().GetResult();
         }
 
         #endregion
